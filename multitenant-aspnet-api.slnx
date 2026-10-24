@@ -1,8 +1,6 @@
 <Solution>
   <Folder Name="/Solution Items/">
     <File Path="compose.yaml" />
-    <File Path=".env.example" />
-    <File Path="README.md" />
     <File Path="Directory.Build.props" />
   </Folder>
   <Folder Name="/src/">
