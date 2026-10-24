@@ -44,6 +44,24 @@ public sealed class LoginRequestValidator : AbstractValidator<LoginRequest>
     }
 }
 
+public sealed class RegisterRequestValidator : AbstractValidator<RegisterRequest>
+{
+    public RegisterRequestValidator()
+    {
+        RuleFor(x => x.TenantSlug)
+            .NotEmpty()
+            .Must(TenantSlugRules.IsValid)
+            .WithMessage(TenantSlugRules.Description);
+
+        RuleFor(x => x.Email).NotEmpty().EmailAddress().MaximumLength(256);
+        RuleFor(x => x.DisplayName).NotEmpty().Length(2, 80);
+        RuleFor(x => x.Password)
+            .NotEmpty()
+            .Must(PasswordRules.IsValid)
+            .WithMessage(PasswordRules.Description);
+    }
+}
+
 public sealed class RefreshTokenRequestValidator : AbstractValidator<RefreshTokenRequest>
 {
     public RefreshTokenRequestValidator()

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Multitenant.Application.Abstractions;
+using Multitenant.Application.Common;
 using Multitenant.Application.Configuration;
 using Multitenant.Application.Contracts;
 using Multitenant.Application.Errors;
@@ -76,6 +77,71 @@ public sealed class AuthService(
         var role = await GetRoleAsync(user);
         var tokens = await IssueTokensAsync(user, role, tenant.Slug, ipAddress, cancellationToken);
         return new LoginSuccess(tokens);
+    }
+
+    public async Task<UserResponse> RegisterAsync(
+        RegisterRequest request,
+        CancellationToken cancellationToken)
+    {
+        var tenant = await tenantStore.FindBySlugAsync(request.TenantSlug, cancellationToken);
+        if (tenant is null || !tenant.IsActive)
+        {
+            throw new NotFoundException("Tenant not found.", "tenant_not_found");
+        }
+
+        tenantContext.SetTenant(tenant.Id, tenant.Slug);
+
+        var email = request.Email.Trim();
+        var normalizedEmail = email.ToUpperInvariant();
+
+        var alreadyRegistered = await dbContext.Users
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                x => x.TenantId == tenant.Id && x.NormalizedEmail == normalizedEmail,
+                cancellationToken);
+
+        if (alreadyRegistered)
+        {
+            throw new ConflictException("That email is already registered in this tenant.", "email_taken");
+        }
+
+        var user = new AppUser
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenant.Id,
+            UserName = UserNames.For(tenant.Slug, email),
+            Email = email,
+            DisplayName = request.DisplayName.Trim(),
+            EmailConfirmed = false,
+            IsActive = true,
+            CreatedAtUtc = timeProvider.GetUtcNow(),
+        };
+
+        var created = await userManager.CreateAsync(user, request.Password);
+        if (!created.Succeeded)
+        {
+            throw new ConflictException(
+                string.Join(" ", created.Errors.Select(x => x.Description)),
+                "user_creation_failed");
+        }
+
+        var role = await userManager.AddToRoleAsync(user, TenantRoles.Member);
+        if (!role.Succeeded)
+        {
+            throw new ConflictException(
+                string.Join(" ", role.Errors.Select(x => x.Description)),
+                "role_assignment_failed");
+        }
+
+        await SendConfirmationEmailAsync(user, cancellationToken);
+
+        return new UserResponse(
+            user.Id,
+            user.Email ?? string.Empty,
+            user.DisplayName,
+            TenantRoles.Member,
+            user.IsActive,
+            user.CreatedAtUtc);
     }
 
     public async Task<AuthTokens> RefreshAsync(
@@ -231,7 +297,8 @@ public sealed class AuthService(
             return;
         }
 
-        await SendConfirmationEmailAsync(user, cancellationToken);    }
+        await SendConfirmationEmailAsync(user, cancellationToken);
+    }
 
     public async Task<TwoFactorSetupResponse> SetupTwoFactorAsync(CancellationToken cancellationToken)
     {

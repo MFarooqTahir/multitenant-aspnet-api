@@ -14,7 +14,8 @@ public sealed class UserService(
     UserManager<AppUser> userManager,
     ICurrentUser currentUser,
     ITenantContext tenantContext,
-    IAccountEmailService accountEmailService) : IUserService
+    IAccountEmailService accountEmailService,
+    TimeProvider timeProvider) : IUserService
 {
     private static readonly HashSet<string> SortFields = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -127,7 +128,7 @@ public sealed class UserService(
             DisplayName = request.DisplayName.Trim(),
             EmailConfirmed = false,
             IsActive = true,
-            CreatedAtUtc = DateTimeOffset.UtcNow,
+            CreatedAtUtc = timeProvider.GetUtcNow(),
         };
 
         var created = await userManager.CreateAsync(user, request.Password);

@@ -3,7 +3,6 @@ using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
@@ -43,16 +42,6 @@ public static class JwtBearerConfiguration
         options.Events = new JwtBearerEvents
         {
             OnTokenValidated = ValidateLiveUserAsync,
-            OnChallenge = context => WriteProblem(
-                context.HttpContext,
-                StatusCodes.Status401Unauthorized,
-                "unauthorized",
-                context.AuthenticateFailure?.Message ?? "Authentication is required to access this resource."),
-            OnForbidden = context => WriteProblem(
-                context.HttpContext,
-                StatusCodes.Status403Forbidden,
-                "forbidden",
-                "You do not have permission to access this resource."),
         };
     }
 
@@ -60,7 +49,7 @@ public static class JwtBearerConfiguration
     {
         var principal = context.Principal;
 
-        if (principal?.Identity is not ClaimsIdentity 
+        if (principal?.Identity is not ClaimsIdentity
             || !Guid.TryParse(principal.FindFirst(AuthClaims.Subject)?.Value, out var userId)
             || !Guid.TryParse(principal.FindFirst(AuthClaims.TenantId)?.Value, out var tenantId))
         {
@@ -111,43 +100,5 @@ public static class JwtBearerConfiguration
         {
             context.Fail("The user's role has changed; acquire a new access token.");
         }
-    }
-
-    private static async Task WriteProblem(
-        HttpContext httpContext,
-        int statusCode,
-        string code,
-        string? detail)
-    {
-        if (httpContext.Response.HasStarted)
-        {
-            return;
-        }
-
-        httpContext.Response.StatusCode = statusCode;
-        httpContext.Response.ContentType = "application/problem+json";
-
-        var problem = new ProblemDetails
-        {
-            Status = statusCode,
-            Title = statusCode == StatusCodes.Status403Forbidden ? "Forbidden" : "Unauthorized",
-            Type = statusCode == StatusCodes.Status403Forbidden
-                ? "https://datatracker.ietf.org/doc/html/rfc9110#section-15.5.4"
-                : "https://datatracker.ietf.org/doc/html/rfc9110#section-15.5.2",
-            Detail = detail,
-            Instance = httpContext.Request.Path,
-            Extensions =
-            {
-                ["code"] = code,
-                ["traceId"] = httpContext.TraceIdentifier,
-                ["correlationId"] = httpContext.Items[CorrelationKeys.ItemKey]
-            }
-        };
-
-        await httpContext.Response.WriteAsJsonAsync(
-            problem,
-            problem.GetType(),
-            options: null,
-            contentType: "application/problem+json");
     }
 }

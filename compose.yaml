@@ -2,26 +2,37 @@
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: multitenant-DbUser
-      POSTGRES_PASSWORD: multitenant-DbPassword123!
-      POSTGRES_DB: multitenantDb
-    ports: [ "5432:5432" ]
+      POSTGRES_USER: ${POSTGRES_USER:-multitenant-DbUser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-multitenant-DbPassword123!}
+      POSTGRES_DB: ${POSTGRES_DB:-multitenantDb}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U multitenant-DbUser -d multitenantDb" ]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 3s
       timeout: 3s
-      retries: 10
+      retries: 20
 
-  multitenant-api:
-    image: multitenant-api
+  api:
+    image: multitenant-api:local
+    build:
+      context: .
+      dockerfile: src/Multitenant.Api/Dockerfile
     ports:
-      - "8080:8080"
+      - "${API_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      ConnectionStrings__Postgres: "Host=postgres;Database=multitenantDb;Username=multitenant-DbUser;Password=multitenant-DbPassword123!"
-      ASPNETCORE_ENVIRONMENT: Development
-    build:
-      context: .
-      dockerfile: src/Multitenant.Api/Dockerfile
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      ASPNETCORE_HTTP_PORTS: 8080
+      ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-multitenantDb};Username=${POSTGRES_USER:-multitenant-DbUser};Password=${POSTGRES_PASSWORD:-multitenant-DbPassword123!}"
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:?JWT_SIGNING_KEY must be set in .env}
+      Demo__Password: ${DEMO_PASSWORD:-Demo123!Passw0rd}
+      Database__AutoMigrate: "true"
+      Database__SeedDemoData: "true"
+
+volumes:
+  postgres-data:

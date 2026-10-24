@@ -9,6 +9,16 @@
     <Project Path="src/Multitenant.Domain/Multitenant.Domain.csproj" />
     <Project Path="src/Multitenant.Infrastructure/Multitenant.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/docs/">
+    <File Path="docs/architecture.md" />
+    <File Path="docs/adr/0001-record-architecture-decisions.md" />
+    <File Path="docs/adr/0002-layered-solution.md" />
+    <File Path="docs/adr/0003-tenant-isolation.md" />
+    <File Path="docs/adr/0004-identity-and-tokens.md" />
+    <File Path="docs/adr/0005-identity-feature-flags.md" />
+    <File Path="docs/adr/0006-rate-limiting.md" />
+    <File Path="docs/adr/0007-observability.md" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Multitenant.IntegrationTests/Multitenant.IntegrationTests.csproj" />
     <Project Path="tests/Multitenant.UnitTests/Multitenant.UnitTests.csproj" />

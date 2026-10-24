@@ -1,46 +1,44 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Multitenant.Api;
 using Testcontainers.PostgreSql;
 
 namespace Multitenant.IntegrationTests.Infrastructure;
 
 /// <summary>
-/// Owns the Testcontainers PostgreSQL container and the <see cref="WebApplicationFactory"/>
-/// used by every integration test. Tests run inside the "Integration" xUnit collection so the
-/// container is only started once and tests do not run in parallel against it.
+/// Owns the Testcontainers PostgreSQL container and the <see cref="WebApplicationFactory{TEntryPoint}"/>
+/// used by every integration test. Registered as an xUnit collection fixture, so the
+/// container starts once per test run and all tests in the collection share it.
 /// </summary>
 public sealed class IntegrationHarness : IDisposable, IAsyncLifetime
 {
     public const string CollectionName = "Integration";
 
-    public static PostgreSqlContainer Container { get; } = new("postgres:16-alpine");
+    private readonly PostgreSqlContainer _container =
+        new PostgreSqlBuilder("postgres:16-alpine").Build();
 
-    public static string ConnectionString { get; private set; } = string.Empty;
+    public string ConnectionString { get; private set; } = string.Empty;
 
-    private static WebApplicationFactory<Program> _factory = CreateFactory();
+    public WebApplicationFactory<IApiMarker> Factory { get; private set; } = null!;
 
     public async Task InitializeAsync()
     {
-        await Container.StartAsync();
-        ConnectionString = Container.GetConnectionString();
-        _factory = CreateFactory();
+        await _container.StartAsync();
+        ConnectionString = _container.GetConnectionString();
+        Factory = CreateFactory();
     }
 
     public async Task DisposeAsync()
     {
-        _factory.Dispose();
-       await Container.StopAsync();
+        Factory.Dispose();
+        await _container.DisposeAsync();
     }
 
-    public void Dispose()
-    {
-        DisposeAsync().GetAwaiter().GetResult();
-    }
+    public void Dispose() => DisposeAsync().GetAwaiter().GetResult();
 
-    public static WebApplicationFactory<Program> DefaultFactory => _factory;
-
-    public static WebApplicationFactory<Program> CreateFactory(Action<Dictionary<string, string?>>? overrideConfiguration = null)
+    public WebApplicationFactory<IApiMarker> CreateFactory(
+        Action<Dictionary<string, string?>>? overrideConfiguration = null)
     {
         var configuration = new Dictionary<string, string?>(CreateDefaultConfiguration())
         {
@@ -66,13 +64,21 @@ public sealed class IntegrationHarness : IDisposable, IAsyncLifetime
         ["Serilog:MinimumLevel:Default"] = "Warning",
     };
 
-    private sealed class IntegrationWebApplicationFactory(Dictionary<string, string?> configuration)
-        : WebApplicationFactory<Program>
+    private sealed class IntegrationWebApplicationFactory : WebApplicationFactory<IApiMarker>
     {
+        private readonly Dictionary<string, string?> _configuration;
+
+        public IntegrationWebApplicationFactory(Dictionary<string, string?> configuration) =>
+            _configuration = configuration;
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Testing");
-            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(configuration));
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(_configuration));
         }
     }
 }
+
+/// <summary>Binds <see cref="IntegrationHarness"/> to the xUnit collection.</summary>
+[CollectionDefinition(IntegrationHarness.CollectionName)]
+public sealed class IntegrationCollectionDefinition : ICollectionFixture<IntegrationHarness>;

@@ -1,0 +1,214 @@
+@host = http://localhost:5270
+@api = {{host}}/api/v1
+
+# Seeded demo tenant. Password: Demo123!Passw0rd
+@tenantSlug = acme
+@email = owner@acme.test
+@password = Demo123!Passw0rd
+
+# Set from the login/register responses.
+@accessToken = paste-access-token-here
+@refreshToken = paste-refresh-token-here
+@projectId = paste-project-id-here
+@taskId = paste-task-id-here
+@userId = paste-user-id-here
+
+### Health (live / ready / full)
+GET {{host}}/health/live
+
+### OpenAPI document and Scalar UI
+GET {{host}}/openapi/v1.json
+
+###
+GET {{host}}/scalar
+
+### Log in to a tenant
+# @name login
+POST {{api}}/auth/login
+Content-Type: application/json
+
+{
+  "tenantSlug": "{{tenantSlug}}",
+  "email": "{{email}}",
+  "password": "{{password}}"
+}
+
+### Register (self-service Member) into an existing tenant
+POST {{api}}/auth/register
+Content-Type: application/json
+
+{
+  "tenantSlug": "{{tenantSlug}}",
+  "email": "new-member@acme.test",
+  "displayName": "New Member",
+  "password": "Password1!aaaa"
+}
+
+### Refresh (rotates the refresh token; reuse revokes the family)
+POST {{api}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refreshToken}}"
+}
+
+### Log out (revokes the supplied refresh token)
+POST {{api}}/auth/logout
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refreshToken}}"
+}
+
+### Log out everywhere (revokes every refresh token and invalidates access tokens)
+POST {{api}}/auth/logout-all
+Authorization: Bearer {{accessToken}}
+
+### Two-factor setup (feature flag must be on)
+POST {{api}}/auth/2fa/setup
+Authorization: Bearer {{accessToken}}
+
+### Two-factor enable (after re-authenticating; setup rotates the security stamp)
+POST {{api}}/auth/2fa/enable
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "code": "123456"
+}
+
+### Two-factor verify challenge from login
+POST {{api}}/auth/2fa/verify
+Content-Type: application/json
+
+{
+  "twoFactorToken": "paste-two-factor-token",
+  "code": "123456",
+  "recoveryCode": null
+}
+
+### Onboard a new tenant (transactional provisioning + starter data)
+POST {{api}}/tenants/onboard
+Content-Type: application/json
+
+{
+  "slug": "initech",
+  "name": "Initech",
+  "ownerEmail": "owner@initech.test",
+  "ownerDisplayName": "Initech Owner",
+  "ownerPassword": "Password1!aaaa"
+}
+
+### Current tenant (resolved from the JWT tenant_id claim)
+GET {{api}}/tenants/current
+Authorization: Bearer {{accessToken}}
+
+### List users (Owner/Admin)
+GET {{api}}/users?page=1&pageSize=20&sort=createdAt
+Authorization: Bearer {{accessToken}}
+
+### Current user profile (any role)
+GET {{api}}/users/me
+Authorization: Bearer {{accessToken}}
+
+### Create a user (Owner/Admin)
+POST {{api}}/users
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "email": "another-member@acme.test",
+  "displayName": "Another Member",
+  "password": "Password1!aaaa",
+  "role": "Member"
+}
+
+### Change a user's role (invalidates that user's access tokens immediately)
+PATCH {{api}}/users/{{userId}}/role
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "role": "Admin"
+}
+
+### Delete a user
+DELETE {{api}}/users/{{userId}}
+Authorization: Bearer {{accessToken}}
+
+### List projects
+GET {{api}}/projects?page=1&pageSize=20&sort=-createdAt
+Authorization: Bearer {{accessToken}}
+
+### Create a project (Owner/Admin)
+# @name createProject
+POST {{api}}/projects
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Apollo",
+  "description": "Landing page rebuild",
+  "status": "Active"
+}
+
+### Get a project
+GET {{api}}/projects/{{projectId}}
+Authorization: Bearer {{accessToken}}
+
+### Update a project
+PUT {{api}}/projects/{{projectId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Apollo v2",
+  "description": "Landing page rebuild, phase 2",
+  "status": "Active"
+}
+
+### Delete a project (cascades to tasks)
+DELETE {{api}}/projects/{{projectId}}
+Authorization: Bearer {{accessToken}}
+
+### List tasks (filters: search, status, priority, projectId, assigneeUserId, dueBefore, dueAfter)
+GET {{api}}/tasks?page=1&pageSize=20&status=Todo&priority=High
+Authorization: Bearer {{accessToken}}
+
+### Create a task in a project (any tenant member)
+# @name createTask
+POST {{api}}/projects/{{projectId}}/tasks
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "title": "Draft the migration plan",
+  "description": "Cover schema, backfill and rollback.",
+  "status": "Todo",
+  "priority": "High",
+  "assigneeUserId": null,
+  "dueDate": "2026-11-15"
+}
+
+### Get a task
+GET {{api}}/tasks/{{taskId}}
+Authorization: Bearer {{accessToken}}
+
+### Update a task
+PUT {{api}}/tasks/{{taskId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "title": "Draft the migration plan",
+  "description": "Cover schema, backfill and rollback.",
+  "status": "InProgress",
+  "priority": "Urgent",
+  "assigneeUserId": null,
+  "dueDate": "2026-11-15"
+}
+
+### Delete a task (Owner/Admin)
+DELETE {{api}}/tasks/{{taskId}}
+Authorization: Bearer {{accessToken}}
