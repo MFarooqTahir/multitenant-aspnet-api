@@ -36,6 +36,11 @@ public sealed class TenantIsolationTests : IntegrationTestBase
             new UpdateProjectRequest("Hijacked", null, ProjectStatus.Archived),
             betaTokens.AccessToken);
         Assert.Equal(HttpStatusCode.NotFound, crossTenantUpdate.StatusCode);
+
+        var crossTenantDelete = await client.DeleteApi(
+            $"/api/v1/projects/{project.Id}",
+            bearer: betaTokens.AccessToken);
+        Assert.Equal(HttpStatusCode.NotFound, crossTenantDelete.StatusCode);
     }
 
     [Fact]
@@ -56,6 +61,12 @@ public sealed class TenantIsolationTests : IntegrationTestBase
 
         var crossTenantResponse = await client.GetApi($"/api/v1/tasks/{task.Id}", betaTokens.AccessToken);
         Assert.Equal(HttpStatusCode.NotFound, crossTenantResponse.StatusCode);
+
+        var crossTenantUpdate = await client.PutApi(
+            $"/api/v1/tasks/{task.Id}",
+            new UpdateTaskRequest("Hijacked", null, WorkItemStatus.Done, WorkItemPriority.Low, null, null),
+            betaTokens.AccessToken);
+        Assert.Equal(HttpStatusCode.NotFound, crossTenantUpdate.StatusCode);
 
         var crossTenantDelete = await client.DeleteApi($"/api/v1/tasks/{task.Id}", bearer: betaTokens.AccessToken);
         Assert.Equal(HttpStatusCode.NotFound, crossTenantDelete.StatusCode);

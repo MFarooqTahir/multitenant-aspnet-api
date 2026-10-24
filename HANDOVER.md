@@ -10,7 +10,7 @@ A practical guide for the next engineer or AI agent picking up this repository.
 | --- | --- |
 | Build | `dotnet build multitenant-aspnet-api.slnx` succeeds with 0 warnings (warnings are errors) |
 | Unit tests | 32 passing |
-| Integration tests | 50 passing against Testcontainers PostgreSQL 16 |
+| Integration tests | 51 passing against Testcontainers PostgreSQL 16 |
 | API surface | Auth, tenants, users, projects, tasks, health, OpenAPI |
 | Migrations | `Persistence/Migrations/20261024141223_InitialCreate` applied automatically in Development |
 | Docker | `Dockerfile` and `compose.yaml` are current; image builds |
@@ -114,6 +114,7 @@ cross-platform.
 | Policies | `src/Multitenant.Api/Authorization/Policies.cs` |
 | Forwarded headers (proxy support) | `src/Multitenant.Api/Configuration/ForwardedHeadersSettings.cs` |
 | OpenAPI bearer scheme | `src/Multitenant.Api/OpenApi/BearerSecuritySchemeTransformer.cs` |
+| Confirmation page (email link) | `src/Multitenant.Api/Endpoints/ConfirmEmailPage.cs` |
 | Error handling | `src/Multitenant.Api/Middleware/GlobalExceptionHandler.cs`, `ProblemDetailsStatusCodePages.cs` |
 | Startup validation (validators, hosts) | `src/Multitenant.Api/Program.cs`, `src/Multitenant.Api/Filters/ValidationFilterAssertion.cs` |
 | Rate limiting | `src/Multitenant.Api/RateLimiting/RateLimitingSetup.cs` |
@@ -229,6 +230,8 @@ cross-platform.
 5. Persisted audit trail for security events.
 6. Templated emails and a real provider (SES / Azure Communication Services).
 7. Optional caching of the per-request user/security-stamp lookup.
+8. Per-tenant feature flags (PDF stretch item; only deployment-wide flags exist today).
+9. Tenant management endpoints (list/get/update/deactivate/delete); onboarding + current only today.
 
 ---
 
@@ -258,7 +261,7 @@ cross-platform.
 1. `git status` — expect a clean tree.
 2. `dotnet build multitenant-aspnet-api.slnx` — expect 0 warnings.
 3. `dotnet test tests/Multitenant.UnitTests` — expect 32 passing.
-4. Start Docker, then `dotnet test tests/Multitenant.IntegrationTests` — expect 50 passing.
+4. Start Docker, then `dotnet test tests/Multitenant.IntegrationTests` — expect 51 passing.
 5. `cp .env.example .env` and adjust `JWT_SIGNING_KEY`/passwords, then
    `docker compose up --build`, open <http://localhost:8080/scalar>, log in as
    `owner@acme.test` / `Demo123!Passw0rd`. To run with `dotnet run` instead, first create the

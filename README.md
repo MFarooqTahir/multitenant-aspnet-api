@@ -5,6 +5,7 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791)
 ![EF Core](https://img.shields.io/badge/EF%20Core-10-512BD4)
 ![Tests](https://img.shields.io/badge/tests-unit%20%2B%20integration-2ea44f)
+![CI](https://github.com/MFarooqTahir/multitenant-aspnet-api/actions/workflows/ci.yml/badge.svg)
 ![Licence](https://img.shields.io/badge/licence-MIT-blue)
 
 A production-minded, multi-tenant SaaS backend written in ASP.NET Core 10 and EF Core 10 on
@@ -19,25 +20,45 @@ is tested and operated.
 
 ---
 
+## Proof in one command
+
+The hiring signal is the isolation test. With Docker running:
+
+```bash
+dotnet test tests/Multitenant.IntegrationTests \
+  --filter "FullyQualifiedName~TenantIsolation"
+```
+
+It onboards two tenants, creates data as Tenant A, then proves Tenant B gets `404` for read,
+update and delete on A's projects and tasks. No mocks, no in-memory database — a real
+PostgreSQL instance via Testcontainers.
+
+Prefer clicking? `docker compose up --build`, then use the two seeded tenants (`acme` and
+`globex`) from the demo table below: log in as each owner and try to fetch the other tenant's
+project id.
+
+---
+
 ## Table of contents
 
-1. [What this project demonstrates](#what-this-project-demonstrates)
-2. [Feature tour](#feature-tour)
-3. [Architecture](#architecture)
-4. [How multi-tenancy works](#how-multi-tenancy-works)
-5. [Authentication and authorization](#authentication-and-authorization)
-6. [How users are added](#how-users-are-added)
-7. [API reference](#api-reference)
-8. [Configuration](#configuration)
-9. [Running locally](#running-locally)
-10. [Testing](#testing)
-11. [Docker and deployment](#docker-and-deployment)
-12. [Observability](#observability)
-13. [Design decisions](#design-decisions)
-14. [Repository layout](#repository-layout)
-15. [Known limitations and next steps](#known-limitations-and-next-steps)
-16. [How this was built](#how-this-was-built)
-17. [Licence](#licence)
+1. [Proof in one command](#proof-in-one-command)
+2. [What this project demonstrates](#what-this-project-demonstrates)
+3. [Feature tour](#feature-tour)
+4. [Architecture](#architecture)
+5. [How multi-tenancy works](#how-multi-tenancy-works)
+6. [Authentication and authorization](#authentication-and-authorization)
+7. [How users are added](#how-users-are-added)
+8. [API reference](#api-reference)
+9. [Configuration](#configuration)
+10. [Running locally](#running-locally)
+11. [Testing](#testing)
+12. [Docker and deployment](#docker-and-deployment)
+13. [Observability](#observability)
+14. [Design decisions](#design-decisions)
+15. [Repository layout](#repository-layout)
+16. [Known limitations and next steps](#known-limitations-and-next-steps)
+17. [How this was built](#how-this-was-built)
+18. [Licence](#licence)
 
 ---
 
@@ -395,6 +416,7 @@ whitelist. Page size is capped at 100.
 | `GET /health/ready` | Database readiness |
 | `GET /openapi/v1.json` | OpenAPI document for v1 |
 | `GET /scalar` | Scalar API explorer |
+| `GET /confirm-email` | Minimal page that reads the email-link fragment and POSTs it |
 
 There is also a complete request collection at
 [`src/Multitenant.Api/Multitenant.Api.http`](src/Multitenant.Api/Multitenant.Api.http) which
@@ -568,7 +590,7 @@ password rules), pagination/sorting (including offset overflow), claim generatio
 challenge validation and refresh token hashing. They run in milliseconds and need no
 infrastructure.
 
-**Integration tests** (`tests/Multitenant.IntegrationTests`, 50 tests) boot the real API with
+**Integration tests** (`tests/Multitenant.IntegrationTests`, 51 tests) boot the real API with
 `WebApplicationFactory<IApiMarker>` against a real PostgreSQL 16 container managed by
 Testcontainers. They cover:
 
@@ -684,6 +706,24 @@ fields @timestamp, @message
 - [0006 — Per-tenant rate limiting](docs/adr/0006-rate-limiting.md)
 - [0007 — Structured logging and RFC 7807 errors](docs/adr/0007-observability.md)
 
+### What changes at 10x scale
+
+The current design is deliberately single-node and single-database. At 10x traffic/users:
+
+- **Rate limiting** moves from the in-process limiter to a Redis-backed partitioned limiter so
+  the budget is shared across replicas instead of being per replica.
+- **Tenant data** stays in one database until contention proves otherwise; the first step is
+  read replicas for list/read endpoints and per-tenant statement timeouts. If a few tenants
+  dominate, move the largest to schema-per-tenant (the Application contracts stay unchanged).
+- **The per-request security-stamp/role lookup** (one indexed read today) gets a short-lived
+  cache keyed by user + stamp, with explicit invalidation on role change/logout.
+- **Email and other side effects** move behind an outbox + background worker so a slow SMTP
+  server cannot add latency to registration/onboarding.
+- **Refresh-token cleanup** becomes a scheduled job (or retention policy) instead of unbounded
+  growth.
+- **Observability** graduates from JSON logs to OpenTelemetry traces/metrics and SLOs
+  (p95 latency, 5xx rate, login failure rate per tenant).
+
 ---
 
 ## Repository layout
@@ -700,7 +740,7 @@ fields @timestamp, @message
 │   ├── architecture.md                diagrams: context, pipeline, ER, refresh states
 │   └── adr/                           architecture decision records
 ├── src/
-│   ├── Multitenant.Api/               controllers, middleware, filters, rate limiting, Program
+│   ├── Multitenant.Api/               controllers, endpoints, middleware, filters, rate limiting, Program
 │   ├── Multitenant.Application/
 │   │   ├── Abstractions/              one interface per file
 │   │   │   ├── Identity/              auth, JWT, current user, account email

@@ -33,6 +33,21 @@ public sealed partial class AuthConfirmationTests : IntegrationTestBase
     }
 
     [Fact]
+    public async Task ConfirmationPageIsServedForEmailLinks()
+    {
+        using var client = CreateClient();
+
+        var response = await client.GetApi("/confirm-email");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
+
+        var html = await response.Content.ReadAsStringAsync();
+        Assert.Contains("/api/v1/auth/confirm-email", html);
+        Assert.Contains("window.location.hash", html);
+    }
+
+    [Fact]
     public async Task ConfirmationIsRequiredForLoginWhenTheFlagIsOn()
     {
         var sender = new CapturingEmailSender();

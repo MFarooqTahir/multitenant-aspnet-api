@@ -52,6 +52,24 @@ Content-Type: application/json
   "refreshToken": "{{refreshToken}}"
 }
 
+### Confirm email (token comes from the confirmation email)
+POST {{api}}/auth/confirm-email
+Content-Type: application/json
+
+{
+  "userId": "{{userId}}",
+  "token": "paste-confirmation-token"
+}
+
+### Resend confirmation (always 202; no-op when confirmation is optional)
+POST {{api}}/auth/resend-confirmation
+Content-Type: application/json
+
+{
+  "tenantSlug": "{{tenantSlug}}",
+  "email": "{{email}}"
+}
+
 ### Log out (revokes the supplied refresh token)
 POST {{api}}/auth/logout
 Authorization: Bearer {{accessToken}}

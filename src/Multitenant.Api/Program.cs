@@ -6,6 +6,7 @@ using Serilog.Events;
 using Serilog.Sinks.ApplicationInsights.TelemetryConverters;
 using Multitenant.Api.Authorization;
 using Multitenant.Api.Configuration;
+using Multitenant.Api.Endpoints;
 using Multitenant.Api.Filters;
 using Multitenant.Api.Middleware;
 using Multitenant.Api.OpenApi;
@@ -157,6 +158,7 @@ app.UseRateLimiter();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapConfirmEmailPage();
 
 // Ensure the ValidationFilter cannot silently fail open: every complex action
 // parameter must have a registered FluentValidation validator.
