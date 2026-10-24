@@ -1,5 +1,6 @@
 using System.Net;
 using Multitenant.Application.Contracts;
+using Multitenant.Application.Contracts.Auth;
 using Multitenant.IntegrationTests.Infrastructure;
 
 namespace Multitenant.IntegrationTests;

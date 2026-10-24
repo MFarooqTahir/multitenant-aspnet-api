@@ -686,9 +686,10 @@ fields @timestamp, @message
 **Conventions**
 
 - One public type per file, named after the type.
-- Folders describe a feature or concern; namespaces stay cohesive per layer
-  (`Multitenant.Application.Contracts` covers all contract folders, for example), so a
-  consumer needs one `using` per layer.
+- Folders describe a feature or concern and **namespaces mirror the folders**
+  (`Multitenant.Application.Contracts.Auth`, `Multitenant.Application.Configuration.Jwt`),
+  so a file's location is predictable from its `using` and namespaces never drift from the
+  directory tree.
 - Interfaces live in `Application/Abstractions`; implementations live in `Infrastructure`.
   `Multitenant.Api` contains no business logic.
 - There is one way to do each thing: one tenant context, one user-creation path, one

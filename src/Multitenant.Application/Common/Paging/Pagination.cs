@@ -1,4 +1,4 @@
-namespace Multitenant.Application.Common;
+namespace Multitenant.Application.Common.Paging;
 
 /// <summary>Shared paging rules so every list endpoint clamps input the same way.</summary>
 public static class Pagination

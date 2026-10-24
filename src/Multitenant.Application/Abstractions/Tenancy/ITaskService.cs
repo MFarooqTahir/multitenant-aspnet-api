@@ -1,6 +1,7 @@
-using Multitenant.Application.Contracts;
+using Multitenant.Application.Contracts.Common;
+using Multitenant.Application.Contracts.Tasks;
 
-namespace Multitenant.Application.Abstractions;
+namespace Multitenant.Application.Abstractions.Tenancy;
 
 /// <summary>
 /// Task CRUD. Every method runs inside the caller's tenant; an id from another

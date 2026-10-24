@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Multitenant.Api.ErrorHandling;
 using Multitenant.Application.Common;
 using Multitenant.Application.Configuration;
+using Multitenant.Application.Configuration.RateLimiting;
 
 namespace Multitenant.Api.RateLimiting;
 

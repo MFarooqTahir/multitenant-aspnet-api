@@ -3,7 +3,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Multitenant.Application.Abstractions;
+using Multitenant.Application.Abstractions.Tenancy;
 using Multitenant.Application.Configuration;
+using Multitenant.Application.Configuration.Database;
 using Multitenant.Domain.Entities;
 
 namespace Multitenant.Infrastructure.Persistence;

@@ -1,4 +1,4 @@
-namespace Multitenant.Application.Errors;
+namespace Multitenant.Application.Errors.Exceptions;
 
 /// <summary>
 /// A feature is compiled in but disabled by configuration. Exposed as 404 so the

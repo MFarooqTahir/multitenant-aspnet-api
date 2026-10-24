@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Multitenant.Application.Configuration;
+using Multitenant.Application.Configuration.Auth;
 using Multitenant.Domain.Entities;
 
 namespace Multitenant.Infrastructure.Identity;

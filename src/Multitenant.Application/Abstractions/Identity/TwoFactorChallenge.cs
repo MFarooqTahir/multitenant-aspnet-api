@@ -1,4 +1,4 @@
-namespace Multitenant.Application.Abstractions;
+namespace Multitenant.Application.Abstractions.Identity;
 
 /// <summary>
 /// Short-lived token proving that a password was verified but the second factor

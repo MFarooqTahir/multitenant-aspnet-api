@@ -2,6 +2,8 @@ using System.IdentityModel.Tokens.Jwt;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Multitenant.Application.Configuration;
+using Multitenant.Application.Configuration.Auth;
+using Multitenant.Application.Configuration.Jwt;
 using Multitenant.Domain.Entities;
 using Multitenant.Infrastructure.Identity;
 

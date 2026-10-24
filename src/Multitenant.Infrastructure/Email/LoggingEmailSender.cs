@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Multitenant.Application.Abstractions;
+using Multitenant.Application.Abstractions.Messaging;
 
 namespace Multitenant.Infrastructure.Email;
 

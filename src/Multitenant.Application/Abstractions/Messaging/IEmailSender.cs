@@ -1,4 +1,4 @@
-namespace Multitenant.Application.Abstractions;
+namespace Multitenant.Application.Abstractions.Messaging;
 
 /// <summary>
 /// Delivers an email. Implementations are selected by <c>Email:Provider</c>

@@ -1,6 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
 using Multitenant.Application.Contracts;
+using Multitenant.Application.Contracts.Auth;
+using Multitenant.Application.Contracts.Common;
+using Multitenant.Application.Contracts.Tenants;
+using Multitenant.Application.Contracts.Users;
 using Multitenant.IntegrationTests.Infrastructure;
 
 namespace Multitenant.IntegrationTests;

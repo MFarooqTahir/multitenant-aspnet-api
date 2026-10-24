@@ -1,4 +1,4 @@
-namespace Multitenant.Application.Abstractions;
+namespace Multitenant.Application.Abstractions.Tenancy;
 
 /// <summary>
 /// Request-scoped ambient state: which tenant the current request belongs to.

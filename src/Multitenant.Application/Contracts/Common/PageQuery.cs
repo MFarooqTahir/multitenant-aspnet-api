@@ -1,4 +1,4 @@
-namespace Multitenant.Application.Contracts;
+namespace Multitenant.Application.Contracts.Common;
 
 /// <summary>Common paging and sort parameters for list endpoints.</summary>
 public abstract class PageQuery

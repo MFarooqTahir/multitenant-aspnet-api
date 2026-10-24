@@ -47,11 +47,12 @@ Read these before changing anything touching data or auth.
 7. **Create users in one place.** Both `POST /auth/register` and `POST /users` call
    `IUserProvisioningService`; add email sending at the call site (onboarding sends only
    after its transaction commits).
-8. **One type per file.** New interfaces go in `Application/Abstractions` (Identity,
-   Messaging or Tenancy), DTOs in `Contracts/<feature>`, validators in `Validation/<feature>`,
-   options in `Configuration/<section>`, and exceptions in `Errors/Exceptions`. Namespaces
-   stay `Multitenant.Application.Contracts`, `.Validation`, `.Configuration`, `.Errors` so
-   consumers keep a single `using` per layer.
+8. **One type per file, namespace mirrors the folder.** New interfaces go in
+   `Application/Abstractions/<Area>` (Identity, Messaging, Tenancy), DTOs in
+   `Contracts/<Feature>`, validators in `Validation/<Feature>`, options in
+   `Configuration/<Section>`, and exceptions in `Errors/Exceptions`. The namespace is the
+   folder path (`Multitenant.Application.Contracts.Auth`, `Multitenant.Application.Configuration.Jwt`),
+   and Rider's namespace check should stay clean.
 9. **Migrations are generated from the Infrastructure project**, not the API:
    `dotnet ef migrations add X --project src/Multitenant.Infrastructure --startup-project src/Multitenant.Infrastructure --output-dir Persistence/Migrations`.
 10. **Analyzers are strict.** `TreatWarningsAsErrors=true` and `AnalysisLevel=latest-recommended`.

@@ -1,6 +1,7 @@
+using Multitenant.Application.Abstractions.Messaging;
 using Multitenant.Domain.Entities;
 
-namespace Multitenant.Application.Abstractions;
+namespace Multitenant.Application.Abstractions.Identity;
 
 /// <summary>
 /// Builds account emails (currently the confirmation link). Kept separate from

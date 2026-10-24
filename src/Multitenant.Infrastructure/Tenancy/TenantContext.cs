@@ -1,4 +1,5 @@
 using Multitenant.Application.Abstractions;
+using Multitenant.Application.Abstractions.Tenancy;
 
 namespace Multitenant.Infrastructure.Tenancy;
 

@@ -1,7 +1,7 @@
 using FluentValidation;
-using Multitenant.Application.Contracts;
+using Multitenant.Application.Contracts.Tasks;
 
-namespace Multitenant.Application.Validation;
+namespace Multitenant.Application.Validation.Tasks;
 
 public sealed class UpdateTaskRequestValidator : AbstractValidator<UpdateTaskRequest>
 {

@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Multitenant.Application.Configuration;
+namespace Multitenant.Application.Configuration.Jwt;
 
 public sealed class JwtOptions
 {

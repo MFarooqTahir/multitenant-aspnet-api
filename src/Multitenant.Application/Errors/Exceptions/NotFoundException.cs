@@ -1,4 +1,4 @@
-namespace Multitenant.Application.Errors;
+namespace Multitenant.Application.Errors.Exceptions;
 
 /// <summary>
 /// The resource does not exist <em>in the current tenant</em>. Cross-tenant ids

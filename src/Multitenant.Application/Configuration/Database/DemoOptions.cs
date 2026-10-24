@@ -1,4 +1,4 @@
-namespace Multitenant.Application.Configuration;
+namespace Multitenant.Application.Configuration.Database;
 
 public sealed class DemoOptions
 {

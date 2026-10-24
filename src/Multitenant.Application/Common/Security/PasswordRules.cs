@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace Multitenant.Application.Common;
+namespace Multitenant.Application.Common.Security;
 
 /// <summary>
 /// One password policy shared by registration, onboarding and admin user creation.
