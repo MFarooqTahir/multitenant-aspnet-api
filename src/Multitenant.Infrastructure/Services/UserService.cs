@@ -9,13 +9,17 @@ using Multitenant.Infrastructure.Persistence;
 
 namespace Multitenant.Infrastructure.Services;
 
+/// <summary>
+/// Tenant-scoped user administration. Authorization rules live here rather than in
+/// controllers so they apply regardless of how the service is called.
+/// </summary>
 public sealed class UserService(
     AppDbContext dbContext,
     UserManager<AppUser> userManager,
     ICurrentUser currentUser,
     ITenantContext tenantContext,
-    IAccountEmailService accountEmailService,
-    TimeProvider timeProvider) : IUserService
+    IUserProvisioningService userProvisioning,
+    IAccountEmailService accountEmailService) : IUserService
 {
     private static readonly HashSet<string> SortFields = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -24,7 +28,9 @@ public sealed class UserService(
         "createdat",
     };
 
-    public async Task<PagedResult<UserResponse>> ListAsync(UserQuery query, CancellationToken cancellationToken)
+    public async Task<PagedResult<UserResponse>> ListAsync(
+        UserQuery query,
+        CancellationToken cancellationToken)
     {
         var (page, pageSize) = Pagination.Normalize(query.Page, query.PageSize);
         var users = dbContext.Users.AsNoTracking();
@@ -55,7 +61,8 @@ public sealed class UserService(
                 return new PagedResult<UserResponse>([], page, pageSize, 0);
             }
 
-            users = users.Where(x => dbContext.UserRoles.Any(ur => ur.UserId == x.Id && ur.RoleId == roleId));
+            users = users.Where(x =>
+                dbContext.UserRoles.Any(ur => ur.UserId == x.Id && ur.RoleId == roleId));
         }
 
         var totalCount = await users.CountAsync(cancellationToken);
@@ -64,8 +71,12 @@ public sealed class UserService(
         users = field switch
         {
             "email" => descending ? users.OrderByDescending(x => x.Email) : users.OrderBy(x => x.Email),
-            "displayname" => descending ? users.OrderByDescending(x => x.DisplayName) : users.OrderBy(x => x.DisplayName),
-            _ => descending ? users.OrderByDescending(x => x.CreatedAtUtc) : users.OrderBy(x => x.CreatedAtUtc),
+            "displayname" => descending
+                ? users.OrderByDescending(x => x.DisplayName)
+                : users.OrderBy(x => x.DisplayName),
+            _ => descending
+                ? users.OrderByDescending(x => x.CreatedAtUtc)
+                : users.OrderBy(x => x.CreatedAtUtc),
         };
 
         var items = await users
@@ -76,7 +87,7 @@ public sealed class UserService(
         var roles = await RolesForAsync(items.Select(x => x.Id).ToList(), cancellationToken);
 
         var responses = items
-            .Select(x => ToResponse(x, roles.GetValueOrDefault(x.Id, TenantRoles.Member)))
+            .Select(x => userProvisioning.ToResponse(x, roles.GetValueOrDefault(x.Id, TenantRoles.Member)))
             .ToList();
 
         return new PagedResult<UserResponse>(responses, page, pageSize, totalCount);
@@ -89,69 +100,45 @@ public sealed class UserService(
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken)
             ?? throw new NotFoundException("User not found.");
 
-        var role = await GetRoleAsync(user);
-        return ToResponse(user, role);
+        return userProvisioning.ToResponse(user, await GetRoleAsync(user));
     }
 
-    public async Task<UserResponse> CreateAsync(CreateUserRequest request, CancellationToken cancellationToken)
+    public async Task<UserResponse> CreateAsync(
+        CreateUserRequest request,
+        CancellationToken cancellationToken)
     {
         var requestedRole = TenantRoles.Normalize(request.Role);
         var actorRole = TenantRoles.Normalize(currentUser.Role);
         var tenantId = tenantContext.TenantId ?? throw new UnauthorizedException();
-
-        if (requestedRole == TenantRoles.Owner && actorRole != TenantRoles.Owner)
-        {
-            throw new ForbiddenException("Only an Owner can create another Owner.", "role_not_allowed");
-        }
 
         if (actorRole == TenantRoles.Member)
         {
             throw new ForbiddenException("Members cannot create users.", "role_not_allowed");
         }
 
-        var email = request.Email.Trim();
-        var normalizedEmail = email.ToUpperInvariant();
-
-        if (await dbContext.Users.AnyAsync(
-                x => x.TenantId == tenantId && x.NormalizedEmail == normalizedEmail,
-                cancellationToken))
+        if (requestedRole == TenantRoles.Owner && actorRole != TenantRoles.Owner)
         {
-            throw new ConflictException("A user with that email already exists in this tenant.", "email_taken");
+            throw new ForbiddenException("Only an Owner can create another Owner.", "role_not_allowed");
         }
 
-        var user = new AppUser
-        {
-            Id = Guid.NewGuid(),
-            TenantId = tenantId,
-            UserName = UserNames.For(tenantContext.Slug ?? string.Empty, email),
-            Email = email,
-            DisplayName = request.DisplayName.Trim(),
-            EmailConfirmed = false,
-            IsActive = true,
-            CreatedAtUtc = timeProvider.GetUtcNow(),
-        };
-
-        var created = await userManager.CreateAsync(user, request.Password);
-        if (!created.Succeeded)
-        {
-            throw new ConflictException(
-                string.Join(" ", created.Errors.Select(x => x.Description)),
-                "user_creation_failed");
-        }
-
-        var roleResult = await userManager.AddToRoleAsync(user, requestedRole);
-        if (!roleResult.Succeeded)
-        {
-            throw new ConflictException(
-                string.Join(" ", roleResult.Errors.Select(x => x.Description)),
-                "role_assignment_failed");
-        }
+        var user = await userProvisioning.CreateAsync(
+            tenantId,
+            tenantContext.Slug ?? string.Empty,
+            request.Email,
+            request.DisplayName,
+            request.Password,
+            requestedRole,
+            cancellationToken);
 
         await accountEmailService.SendConfirmationEmailAsync(user, cancellationToken);
-        return ToResponse(user, requestedRole);
+
+        return userProvisioning.ToResponse(user, requestedRole);
     }
 
-    public async Task<UserResponse> UpdateRoleAsync(Guid id, string role, CancellationToken cancellationToken)
+    public async Task<UserResponse> UpdateRoleAsync(
+        Guid id,
+        string role,
+        CancellationToken cancellationToken)
     {
         var target = await dbContext.Users.FirstOrDefaultAsync(x => x.Id == id, cancellationToken)
             ?? throw new NotFoundException("User not found.");
@@ -179,42 +166,28 @@ public sealed class UserService(
 
         if (currentRole == requestedRole)
         {
-            return ToResponse(target, requestedRole);
+            return userProvisioning.ToResponse(target, requestedRole);
         }
 
-        if (currentRole == TenantRoles.Owner)
+        if (currentRole == TenantRoles.Owner && await CountOwnersAsync(cancellationToken) <= 1)
         {
-            var owners = await CountOwnersAsync(cancellationToken);
-            if (owners <= 1)
-            {
-                throw new ConflictException("The last Owner cannot be demoted.", "last_owner");
-            }
+            throw new ConflictException("The last Owner cannot be demoted.", "last_owner");
         }
 
         if (targetRoles.Count > 0)
         {
             var removed = await userManager.RemoveFromRolesAsync(target, targetRoles);
-            if (!removed.Succeeded)
-            {
-                throw new ConflictException(
-                    string.Join(" ", removed.Errors.Select(x => x.Description)),
-                    "role_update_failed");
-            }
+            EnsureSucceeded(removed, "role_update_failed");
         }
 
         var added = await userManager.AddToRoleAsync(target, requestedRole);
-        if (!added.Succeeded)
-        {
-            throw new ConflictException(
-                string.Join(" ", added.Errors.Select(x => x.Description)),
-                "role_update_failed");
-        }
+        EnsureSucceeded(added, "role_update_failed");
 
-        // Invalidate every JWT issued with the previous role. Refresh tokens remain valid,
-        // so the next /auth/refresh call issues a token with the new role.
+        // Invalidate every access token issued with the previous role. Refresh tokens
+        // stay valid, so the next refresh returns a token carrying the new role.
         await userManager.UpdateSecurityStampAsync(target);
 
-        return ToResponse(target, requestedRole);
+        return userProvisioning.ToResponse(target, requestedRole);
     }
 
     public async Task DeleteAsync(Guid id, CancellationToken cancellationToken)
@@ -241,22 +214,12 @@ public sealed class UserService(
             throw new ForbiddenException("Only an Owner can delete an Owner.", "role_not_allowed");
         }
 
-        if (targetRole == TenantRoles.Owner)
+        if (targetRole == TenantRoles.Owner && await CountOwnersAsync(cancellationToken) <= 1)
         {
-            var owners = await CountOwnersAsync(cancellationToken);
-            if (owners <= 1)
-            {
-                throw new ConflictException("The last Owner cannot be deleted.", "last_owner");
-            }
+            throw new ConflictException("The last Owner cannot be deleted.", "last_owner");
         }
 
-        var deleted = await userManager.DeleteAsync(target);
-        if (!deleted.Succeeded)
-        {
-            throw new ConflictException(
-                string.Join(" ", deleted.Errors.Select(x => x.Description)),
-                "user_delete_failed");
-        }
+        EnsureSucceeded(await userManager.DeleteAsync(target), "user_delete_failed");
     }
 
     private async Task<Dictionary<Guid, string>> RolesForAsync(
@@ -289,6 +252,7 @@ public sealed class UserService(
     private Task<int> CountOwnersAsync(CancellationToken cancellationToken)
     {
         var ownerRole = TenantRoles.Owner.ToUpperInvariant();
+
         return (
                 from userRole in dbContext.UserRoles
                 join role in dbContext.Roles on userRole.RoleId equals role.Id
@@ -298,12 +262,13 @@ public sealed class UserService(
             .CountAsync(cancellationToken);
     }
 
-    private static UserResponse ToResponse(AppUser user, string role) =>
-        new(
-            user.Id,
-            user.Email ?? string.Empty,
-            user.DisplayName,
-            role,
-            user.IsActive,
-            user.CreatedAtUtc);
+    private static void EnsureSucceeded(IdentityResult result, string code)
+    {
+        if (!result.Succeeded)
+        {
+            throw new ConflictException(
+                string.Join(" ", result.Errors.Select(x => x.Description)),
+                code);
+        }
+    }
 }

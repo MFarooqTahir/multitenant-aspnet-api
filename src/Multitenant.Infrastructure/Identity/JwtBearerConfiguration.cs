@@ -61,11 +61,15 @@ public static class JwtBearerConfiguration
         var tenantContext = services.GetRequiredService<ITenantContext>();
         var dbContext = services.GetRequiredService<AppDbContext>();
         var userManager = services.GetRequiredService<UserManager<AppUser>>();
-        var tenantStore = services.GetRequiredService<ITenantStore>();
 
         tenantContext.SetTenant(tenantId, principal.FindFirst(AuthClaims.TenantSlug)?.Value ?? string.Empty);
 
-        var tenant = await tenantStore.FindByIdAsync(tenantId, context.HttpContext.RequestAborted);
+        var tenant = await dbContext.Tenants
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                x => x.Id == tenantId,
+                context.HttpContext.RequestAborted);
+
         if (tenant is null || !tenant.IsActive)
         {
             context.Fail("The tenant is not active.");

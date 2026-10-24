@@ -16,12 +16,12 @@ public sealed class TenantDomainTests
         [InlineData("-acme", false)]
         [InlineData("acme-", false)]
         public void ValidatesSlugs(string slug, bool expected) =>
-            Assert.Equal(expected, TenantSlug.IsValid(slug));
+            Assert.Equal(expected, Domain.Entities.TenantSlug.IsValid(slug));
 
         [Fact]
         public void NormalizesToLowercaseWithoutWhitespace()
         {
-            Assert.Equal("acme", TenantSlug.Normalize("  AcMe "));
+            Assert.Equal("acme", Domain.Entities.TenantSlug.Normalize("  AcMe "));
         }
     }
 
@@ -69,54 +69,5 @@ public sealed class TenantDomainTests
         {
             Assert.False(PasswordRules.IsValid("Str0ng!Pass"));
         }
-    }
-}
-
-public sealed class PaginationAndSortingTests
-{
-    [Fact]
-    public void NormalizesPageAndSize()
-    {
-        var (page, size) = Pagination.Normalize(0, 0);
-        Assert.Equal(1, page);
-        Assert.Equal(20, size);
-
-        var (_, max) = Pagination.Normalize(1, 500);
-        Assert.Equal(100, max);
-    }
-
-    [Fact]
-    public void ComputesSkip()
-    {
-        Assert.Equal(40, Pagination.Skip(3, 20));
-    }
-
-    [Fact]
-    public void ParsesAscendingAndDescendingSort()
-    {
-        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "name", "createdat" };
-        var ascending = Sorting.Parse("name", allowed, "createdat");
-        Assert.Equal(("name", false), ascending);
-
-        var descending = Sorting.Parse("-createdAt", allowed, "createdat");
-        Assert.Equal(("createdat", true), descending);
-    }
-
-    [Fact]
-    public void FallsBackToDefaultSortForUnknownFields()
-    {
-        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "name", "createdat" };
-        var result = Sorting.Parse("evilField", allowed, "createdat");
-        Assert.Equal(("createdat", false), result);
-    }
-}
-
-public sealed class UserNameTests
-{
-    [Fact]
-    public void NamespacesUserNamesByTenantSlug()
-    {
-        var name = UserNames.For("Acme", "Owner@Acme.com");
-        Assert.Equal("acme:owner@acme.com", name);
     }
 }

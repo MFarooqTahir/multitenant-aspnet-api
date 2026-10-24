@@ -153,6 +153,7 @@ it with the composite `(TenantId, ProjectId)` foreign key.
 | Query filters and model configuration | `src/Multitenant.Infrastructure/Persistence/AppDbContext.cs` |
 | Write guard + timestamp stamping | `src/Multitenant.Infrastructure/Persistence/TenantAuditingInterceptor.cs` |
 | Login, refresh, 2FA, registration | `src/Multitenant.Infrastructure/Identity/AuthService.cs` |
+| User creation (registration + admin) | `src/Multitenant.Infrastructure/Identity/UserProvisioningService.cs` |
 | Refresh token hashing/rotation helpers | `src/Multitenant.Infrastructure/Identity/RefreshTokenManager.cs` |
 | Tenant onboarding transaction | `src/Multitenant.Infrastructure/Services/TenantService.cs` |
 | Error contract | `src/Multitenant.Api/Middleware/GlobalExceptionHandler.cs` |

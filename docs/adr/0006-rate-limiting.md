@@ -12,13 +12,15 @@ otherwise need.
 
 ## Decision
 
-Use ASP.NET Core's built-in `RateLimiter` middleware with two fixed-window policies:
+Use ASP.NET Core's built-in `RateLimiter` middleware with a global limiter and one
+stricter named policy:
 
-- **`tenant`** (global limiter) — 120 requests/minute partitioned by the `tenant_id` claim,
-  falling back to the client IP for anonymous requests. Because the partition key is the
-  tenant, one tenant exhausting its budget cannot affect another.
-- **`auth`** — 10 requests/minute partitioned by client IP, applied to login, refresh,
-  register, resend-confirmation, two-factor verification and tenant onboarding.
+- **Global limiter** — 120 requests/minute partitioned by the `tenant_id` claim, falling
+  back to the client IP for anonymous requests. Because the partition key is the tenant, one
+  tenant exhausting its budget cannot affect another.
+- **`auth` policy** — 10 requests/minute partitioned by client IP, applied to login,
+  refresh, register, resend-confirmation, two-factor verification and tenant onboarding.
+  It runs alongside the global limiter, giving auth endpoints the stricter of the two.
 
 Options are resolved per request from `IOptions<RateLimitingOptions>`, so configuration
 overrides (including test hosts) take effect without rebuilding the policy.

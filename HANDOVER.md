@@ -29,24 +29,34 @@ Read these before changing anything touching data or auth.
 1. **Tenant context is not optional.** Every tenant-owned write requires
    `ITenantContext.IsResolved`. Authenticated requests get it from the JWT via
    `JwtBearerConfiguration`; anonymous flows (login, refresh, registration, onboarding) must
-   call `SetTenant` before touching tenant-owned tables.
+   call `SetTenant` before touching tenant-owned tables. `ITenantContext` exists only because
+   query filters and the write guard cannot be handed a tenant by each caller — data access
+   itself always goes through `AppDbContext`. There is deliberately no tenant repository.
 2. **Never capture `ITenantContext` in an EF query filter.** The filters use
    `AppDbContext.CurrentTenantId` because EF caches the model per context type. A closure
    would freeze the first request's tenant for the process lifetime.
 3. **`IgnoreQueryFilters()` must be paired with an explicit `TenantId` predicate.** It appears
-   only in `AuthService`, `UserService` role listing/validation helpers, `DatabaseInitializer`
-   and `JwtBearerConfiguration`. Do not add it casually.
+   only in `AuthService`, `UserProvisioningService`, `UserService` role lookups,
+   `DatabaseInitializer` and `JwtBearerConfiguration`. Do not add it casually.
 4. **Do not bypass the security-stamp check.** Access tokens are validated against the live
    user, role and security stamp on every request. Removing that makes role changes and
    logout-everywhere non-immediate.
 5. **`SingleSessionPerUser` defaults to true.** Any change to login/refresh must preserve the
    behaviour: a new session invalidates older access tokens and refresh tokens.
 6. **Cross-tenant resources return 404.** Do not "improve" this to 403; it leaks existence.
-7. **Migrations are generated from the Infrastructure project**, not the API:
+7. **Create users in one place.** Both `POST /auth/register` and `POST /users` call
+   `IUserProvisioningService`; add email sending at the call site (onboarding sends only
+   after its transaction commits).
+8. **One type per file.** New interfaces go in `Application/Abstractions` (Identity,
+   Messaging or Tenancy), DTOs in `Contracts/<feature>`, validators in `Validation/<feature>`,
+   options in `Configuration/<section>`, and exceptions in `Errors/Exceptions`. Namespaces
+   stay `Multitenant.Application.Contracts`, `.Validation`, `.Configuration`, `.Errors` so
+   consumers keep a single `using` per layer.
+9. **Migrations are generated from the Infrastructure project**, not the API:
    `dotnet ef migrations add X --project src/Multitenant.Infrastructure --startup-project src/Multitenant.Infrastructure --output-dir Persistence/Migrations`.
-8. **Analyzers are strict.** `TreatWarningsAsErrors=true` and `AnalysisLevel=latest-recommended`.
-   Use `[LoggerMessage]` partial methods (CA1848), and keep CA1861/CA1707 suppressions where
-   they are (migrations and test names only).
+10. **Analyzers are strict.** `TreatWarningsAsErrors=true` and `AnalysisLevel=latest-recommended`.
+    Use `[LoggerMessage]` partial methods (CA1848), and keep CA1861/CA1707 suppressions where
+    they are (migrations and test names only).
 
 ---
 
@@ -94,11 +104,12 @@ cross-platform.
 | Seeding | `src/Multitenant.Infrastructure/Persistence/DatabaseInitializer.cs` |
 | Tenant onboarding transaction | `src/Multitenant.Infrastructure/Services/TenantService.cs` |
 | User/role rules | `src/Multitenant.Infrastructure/Services/UserService.cs` |
+| User creation (all paths) | `src/Multitenant.Infrastructure/Identity/UserProvisioningService.cs` |
 | Project/task queries | `src/Multitenant.Infrastructure/Services/ProjectService.cs`, `TaskService.cs` |
-| Contracts (DTOs) | `src/Multitenant.Application/Contracts/Contracts.cs` |
-| Service interfaces | `src/Multitenant.Application/Abstractions/IServices.cs` |
-| Validators | `src/Multitenant.Application/Validation/Validators.cs` |
-| Config options | `src/Multitenant.Application/Configuration/Options.cs` |
+| Contracts (DTOs) | `src/Multitenant.Application/Contracts/` (one file per DTO, grouped by feature) |
+| Service interfaces | `src/Multitenant.Application/Abstractions/` (one interface per file) |
+| Validators | `src/Multitenant.Application/Validation/` (one validator per file) |
+| Config options | `src/Multitenant.Application/Configuration/` (one options class per file) |
 | Policies | `src/Multitenant.Api/Authorization/Policies.cs` |
 | Error handling | `src/Multitenant.Api/Middleware/GlobalExceptionHandler.cs`, `ProblemDetailsStatusCodePages.cs` |
 | Rate limiting | `src/Multitenant.Api/RateLimiting/RateLimitingSetup.cs` |
