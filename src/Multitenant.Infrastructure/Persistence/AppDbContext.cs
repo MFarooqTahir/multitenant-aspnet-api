@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
-using Multitenant.Application.Abstractions;
 using Multitenant.Application.Abstractions.Tenancy;
 using Multitenant.Domain.Entities;
 
@@ -56,6 +55,10 @@ public sealed class AppDbContext(
 
             entity.HasIndex(x => x.TenantId);
             entity.HasIndex(x => new { x.TenantId, x.NormalizedEmail }).IsUnique();
+
+            // Composite key target for tenant-safe foreign keys (task assignee).
+            entity.HasAlternateKey(x => new { x.TenantId, x.Id });
+
             entity.HasOne(x => x.Tenant)
                 .WithMany(x => x.Users)
                 .HasForeignKey(x => x.TenantId)
@@ -88,7 +91,10 @@ public sealed class AppDbContext(
 
         builder.Entity<WorkItem>(entity =>
         {
-            entity.ToTable("WorkItems");
+            entity.ToTable("WorkItems", table => table.HasCheckConstraint(
+                "CK_WorkItems_AssigneeTenant",
+                "\"AssigneeTenantId\" IS NULL OR \"AssigneeTenantId\" = \"TenantId\""));
+
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Title).HasMaxLength(200).IsRequired();
             entity.Property(x => x.Description).HasMaxLength(4000);
@@ -111,7 +117,8 @@ public sealed class AppDbContext(
 
             entity.HasOne(x => x.Assignee)
                 .WithMany()
-                .HasForeignKey(x => x.AssigneeUserId)
+                .HasForeignKey(x => new { x.AssigneeTenantId, x.AssigneeUserId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
                 .OnDelete(DeleteBehavior.SetNull);
 
             entity.HasQueryFilter(x => x.TenantId == CurrentTenantId);

@@ -126,6 +126,7 @@ erDiagram
         varchar Status
         varchar Priority
         uuid AssigneeUserId FK
+        uuid AssigneeTenantId
         date DueDate
     }
     RefreshTokens {

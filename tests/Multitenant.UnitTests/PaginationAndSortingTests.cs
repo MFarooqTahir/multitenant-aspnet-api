@@ -1,4 +1,3 @@
-using Multitenant.Application.Common;
 using Multitenant.Application.Common.Paging;
 
 namespace Multitenant.UnitTests;
@@ -20,6 +19,13 @@ public sealed class PaginationAndSortingTests
     public void ComputesSkip()
     {
         Assert.Equal(40, Pagination.Skip(3, 20));
+    }
+
+    [Fact]
+    public void LargePageNumbersDoNotOverflowTheOffset()
+    {
+        Assert.Equal(int.MaxValue, Pagination.Skip(int.MaxValue, 100));
+        Assert.True(Pagination.Skip(1_000_000, 100) > 0);
     }
 
     [Fact]

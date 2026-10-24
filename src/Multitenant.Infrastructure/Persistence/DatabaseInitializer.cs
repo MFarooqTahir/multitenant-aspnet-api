@@ -2,9 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Multitenant.Application.Abstractions;
 using Multitenant.Application.Abstractions.Tenancy;
-using Multitenant.Application.Configuration;
 using Multitenant.Application.Configuration.Database;
 using Multitenant.Domain.Entities;
 
@@ -133,6 +131,7 @@ public sealed partial class DatabaseInitializer(
                 Status = WorkItemStatus.Done,
                 Priority = WorkItemPriority.Medium,
                 AssigneeUserId = owner.Id,
+                AssigneeTenantId = tenant.Id,
             },
             new WorkItem
             {
@@ -143,6 +142,7 @@ public sealed partial class DatabaseInitializer(
                 Status = WorkItemStatus.InProgress,
                 Priority = WorkItemPriority.High,
                 AssigneeUserId = owner.Id,
+                AssigneeTenantId = tenant.Id,
             },
             new WorkItem
             {

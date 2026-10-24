@@ -18,5 +18,14 @@ public static class Pagination
         return (normalizedPage, normalizedPageSize);
     }
 
-    public static int Skip(int page, int pageSize) => (page - 1) * pageSize;
+    /// <summary>
+    /// Converts a page number to an SQL offset. Computed in 64-bit and capped at
+    /// <see cref="int.MaxValue"/> so an absurd page number cannot overflow into a
+    /// negative offset and turn into a 500.
+    /// </summary>
+    public static int Skip(int page, int pageSize)
+    {
+        var skip = (long)(page - 1) * pageSize;
+        return skip >= int.MaxValue ? int.MaxValue : (int)skip;
+    }
 }

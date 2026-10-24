@@ -1,4 +1,3 @@
-using Multitenant.Application.Contracts;
 using Multitenant.Application.Contracts.Auth;
 using Multitenant.Application.Contracts.Projects;
 using Multitenant.Application.Contracts.Tenants;

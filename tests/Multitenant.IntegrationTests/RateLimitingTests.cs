@@ -1,5 +1,4 @@
 using System.Net;
-using Multitenant.Application.Contracts;
 using Multitenant.Application.Contracts.Auth;
 using Multitenant.IntegrationTests.Infrastructure;
 
@@ -13,7 +12,7 @@ public sealed class RateLimitingTests : IntegrationTestBase
     [Fact]
     public async Task AuthEndpointsAreLimitedPerIp()
     {
-        using var factory = Harness.CreateFactory(configuration =>
+        await using var factory = Harness.CreateFactory(configuration =>
         {
             configuration["RateLimiting:Auth:PermitLimit"] = "2";
             configuration["RateLimiting:Auth:WindowSeconds"] = "60";
@@ -37,7 +36,7 @@ public sealed class RateLimitingTests : IntegrationTestBase
     [Fact]
     public async Task AuthenticatedTrafficIsLimitedPerTenant()
     {
-        using var factory = Harness.CreateFactory(configuration =>
+        await using var factory = Harness.CreateFactory(configuration =>
         {
             configuration["RateLimiting:Tenant:PermitLimit"] = "3";
             configuration["RateLimiting:Tenant:WindowSeconds"] = "60";
@@ -56,5 +55,59 @@ public sealed class RateLimitingTests : IntegrationTestBase
 
         Assert.Contains(HttpStatusCode.TooManyRequests, statuses);
         Assert.Equal(HttpStatusCode.TooManyRequests, statuses[^1]);
+    }
+
+    [Fact]
+    public async Task OneTenantExhaustingItsBudgetDoesNotThrottleAnother()
+    {
+        // Create the tenants with the unrestricted fixture first: onboarding itself
+        // counts against the global limiter, and would consume the tiny budget.
+        AuthTokens noisy;
+        AuthTokens quiet;
+
+        using (var setupClient = CreateClient())
+        {
+            noisy = await Scenarios.OnboardAndLoginAsync(setupClient, "rate-noisy", "noisy@acme.test");
+            quiet = await Scenarios.OnboardAndLoginAsync(setupClient, "rate-quiet", "quiet@acme.test");
+        }
+
+        await using var factory = Harness.CreateFactory(configuration =>
+        {
+            configuration["RateLimiting:Tenant:PermitLimit"] = "2";
+            configuration["RateLimiting:Tenant:WindowSeconds"] = "60";
+            configuration["RateLimiting:Auth:PermitLimit"] = "100";
+        });
+        using var client = factory.CreateClient();
+
+        // Exhaust the noisy tenant's budget.
+        for (var i = 0; i < 3; i++)
+        {
+            await client.GetApi("/api/v1/tenants/current", noisy.AccessToken);
+        }
+
+        var throttled = await client.GetApi("/api/v1/tenants/current", noisy.AccessToken);
+        Assert.Equal(HttpStatusCode.TooManyRequests, throttled.StatusCode);
+
+        // The quiet tenant still has its own budget.
+        var healthy = await client.GetApi("/api/v1/tenants/current", quiet.AccessToken);
+        Assert.Equal(HttpStatusCode.OK, healthy.StatusCode);
+    }
+
+    [Fact]
+    public async Task HealthChecksAreNotRateLimited()
+    {
+        await using var factory = Harness.CreateFactory(configuration =>
+        {
+            configuration["RateLimiting:Tenant:PermitLimit"] = "1";
+            configuration["RateLimiting:Tenant:WindowSeconds"] = "60";
+        });
+        using var client = factory.CreateClient();
+
+        // Health probes must keep responding even when the request budget is gone.
+        for (var i = 0; i < 5; i++)
+        {
+            var live = await client.GetApi("/health/live");
+            Assert.Equal(HttpStatusCode.OK, live.StatusCode);
+        }
     }
 }

@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
 using Multitenant.Application.Common;
 
 namespace Multitenant.Api.ErrorHandling;

@@ -20,6 +20,13 @@ public sealed class WorkItem : ITenantOwned, IHasTimestamps
 
     public Guid? AssigneeUserId { get; set; }
 
+    /// <summary>
+    /// Denormalized copy of the assignee's tenant, so the composite foreign key
+    /// <c>(AssigneeTenantId, AssigneeUserId)</c> can enforce that a task is only
+    /// assigned to a user in the same tenant at the database level.
+    /// </summary>
+    public Guid? AssigneeTenantId { get; set; }
+
     public AppUser? Assignee { get; set; }
 
     public DateOnly? DueDate { get; set; }

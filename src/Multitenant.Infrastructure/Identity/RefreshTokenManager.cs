@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using Multitenant.Application.Configuration;
 using Multitenant.Application.Configuration.Auth;
 using Multitenant.Domain.Entities;
 
@@ -43,8 +42,7 @@ public sealed class RefreshTokenManager(
         return (raw, entity);
     }
 
-    public Task<RefreshToken?> FindByHashAsync(string hash, CancellationToken cancellationToken) =>
-        dbContext.RefreshTokens.FirstOrDefaultAsync(x => x.TokenHash == hash, cancellationToken);
+
 
     public async Task RevokeFamilyAsync(Guid familyId, string reason, CancellationToken cancellationToken)
     {

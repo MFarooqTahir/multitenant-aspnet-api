@@ -1,14 +1,10 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Multitenant.Application.Abstractions;
 using Multitenant.Application.Abstractions.Identity;
 using Multitenant.Application.Abstractions.Tenancy;
-using Multitenant.Application.Common;
 using Multitenant.Application.Common.Paging;
-using Multitenant.Application.Contracts;
 using Multitenant.Application.Contracts.Common;
 using Multitenant.Application.Contracts.Users;
-using Multitenant.Application.Errors;
 using Multitenant.Application.Errors.Exceptions;
 using Multitenant.Domain.Entities;
 using Multitenant.Infrastructure.Persistence;
@@ -180,6 +176,10 @@ public sealed class UserService(
             throw new ConflictException("The last Owner cannot be demoted.", "last_owner");
         }
 
+        // Both role writes must succeed together; otherwise the user would be left
+        // with no role at all.
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
         if (targetRoles.Count > 0)
         {
             var removed = await userManager.RemoveFromRolesAsync(target, targetRoles);
@@ -192,6 +192,7 @@ public sealed class UserService(
         // Invalidate every access token issued with the previous role. Refresh tokens
         // stay valid, so the next refresh returns a token carrying the new role.
         await userManager.UpdateSecurityStampAsync(target);
+        await transaction.CommitAsync(cancellationToken);
 
         return userProvisioning.ToResponse(target, requestedRole);
     }
@@ -259,9 +260,13 @@ public sealed class UserService(
     {
         var ownerRole = TenantRoles.Owner.ToUpperInvariant();
 
+        // Joining AppUsers applies the tenant query filter, so Owners in other
+        // tenants are not counted. Without this join the "last Owner" guard would
+        // look at the whole database.
         return (
                 from userRole in dbContext.UserRoles
                 join role in dbContext.Roles on userRole.RoleId equals role.Id
+                join user in dbContext.Users on userRole.UserId equals user.Id
                 where role.NormalizedName == ownerRole
                 select userRole.UserId)
             .Distinct()

@@ -1,14 +1,16 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Multitenant.Api;
 using Testcontainers.PostgreSql;
 
 namespace Multitenant.IntegrationTests.Infrastructure;
 
 /// <summary>
-/// Owns the Testcontainers PostgreSQL container and the <see cref="WebApplicationFactory{TEntryPoint}"/>
-/// used by every integration test. Registered as an xUnit collection fixture, so the
+/// Owns the Testcontainers PostgreSQL container and the WebApplicationFactory used
+/// by every integration test. Registered as an xUnit collection fixture, so the
 /// container starts once per test run and all tests in the collection share it.
 /// </summary>
 public sealed class IntegrationHarness : IDisposable, IAsyncLifetime
@@ -38,7 +40,8 @@ public sealed class IntegrationHarness : IDisposable, IAsyncLifetime
     public void Dispose() => DisposeAsync().GetAwaiter().GetResult();
 
     public WebApplicationFactory<IApiMarker> CreateFactory(
-        Action<Dictionary<string, string?>>? overrideConfiguration = null)
+        Action<Dictionary<string, string?>>? overrideConfiguration = null,
+        Action<IServiceCollection>? configureServices = null)
     {
         var configuration = new Dictionary<string, string?>(CreateDefaultConfiguration())
         {
@@ -47,7 +50,7 @@ public sealed class IntegrationHarness : IDisposable, IAsyncLifetime
 
         overrideConfiguration?.Invoke(configuration);
 
-        return new IntegrationWebApplicationFactory(configuration);
+        return new IntegrationWebApplicationFactory(configuration, configureServices);
     }
 
     private static Dictionary<string, string?> CreateDefaultConfiguration() => new()
@@ -67,14 +70,25 @@ public sealed class IntegrationHarness : IDisposable, IAsyncLifetime
     private sealed class IntegrationWebApplicationFactory : WebApplicationFactory<IApiMarker>
     {
         private readonly Dictionary<string, string?> _configuration;
+        private readonly Action<IServiceCollection>? _configureServices;
 
-        public IntegrationWebApplicationFactory(Dictionary<string, string?> configuration) =>
+        public IntegrationWebApplicationFactory(
+            Dictionary<string, string?> configuration,
+            Action<IServiceCollection>? configureServices)
+        {
             _configuration = configuration;
+            _configureServices = configureServices;
+        }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Testing");
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(_configuration));
+
+            if (_configureServices is not null)
+            {
+                builder.ConfigureTestServices(_configureServices);
+            }
         }
     }
 }

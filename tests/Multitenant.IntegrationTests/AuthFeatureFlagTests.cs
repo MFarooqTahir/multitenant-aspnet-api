@@ -1,5 +1,4 @@
 using System.Net;
-using Multitenant.Application.Contracts;
 using Multitenant.Application.Contracts.Auth;
 using Multitenant.IntegrationTests.Infrastructure;
 
@@ -13,7 +12,7 @@ public sealed class AuthFeatureFlagTests : IntegrationTestBase
     [Fact]
     public async Task UnconfirmedUsersCannotLoginWhenConfirmationIsRequired()
     {
-        using var factory = Harness.CreateFactory(configuration =>
+        await using var factory = Harness.CreateFactory(configuration =>
             configuration["Identity:RequireConfirmedEmail"] = "true");
         using var client = factory.CreateClient();
 
@@ -48,7 +47,7 @@ public sealed class AuthFeatureFlagTests : IntegrationTestBase
     [Fact]
     public async Task TwoFactorCanBeEnabledAndIsRequiredAtLogin()
     {
-        using var factory = Harness.CreateFactory(configuration =>
+        await using var factory = Harness.CreateFactory(configuration =>
             configuration["Identity:EnableTwoFactor"] = "true");
         using var client = factory.CreateClient();
 
@@ -91,5 +90,95 @@ public sealed class AuthFeatureFlagTests : IntegrationTestBase
 
         var verified = await verify.ReadAsync<AuthTokens>();
         Assert.False(string.IsNullOrWhiteSpace(verified.AccessToken));
+    }
+
+    [Fact]
+    public async Task TwoFactorCanBeDisabledAndRecoveryCodesAreSingleUse()
+    {
+        await using var factory = Harness.CreateFactory(configuration =>
+            configuration["Identity:EnableTwoFactor"] = "true");
+        using var client = factory.CreateClient();
+
+        var tokens = await Scenarios.OnboardAndLoginAsync(client, "flag-2fa-recovery", "recovery@acme.test");
+
+        var setupResponse = await client.PostApi("/api/v1/auth/2fa/setup", null, tokens.AccessToken);
+        var setup = await setupResponse.ReadAsync<TwoFactorSetupResponse>();
+
+        var postSetupTokens = await Scenarios.LoginAsync(
+            client,
+            "flag-2fa-recovery",
+            "recovery@acme.test",
+            Scenarios.Password);
+
+        var enable = await client.PostApi(
+            "/api/v1/auth/2fa/enable",
+            new TwoFactorEnableRequest(Totp.Compute(setup.SharedKey, DateTimeOffset.UtcNow)),
+            postSetupTokens.AccessToken);
+        var enabled = await enable.ReadAsync<TwoFactorEnabledResponse>();
+        Assert.NotEmpty(enabled.RecoveryCodes);
+
+        var recoveryCode = enabled.RecoveryCodes[0];
+
+        // A recovery code works once.
+        var firstUse = await VerifyWithRecoveryCodeAsync(client, recoveryCode);
+        Assert.Equal(HttpStatusCode.OK, firstUse.StatusCode);
+
+        // The same code must be rejected afterwards.
+        var secondUse = await VerifyWithRecoveryCodeAsync(client, recoveryCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, secondUse.StatusCode);
+
+        // Log in with TOTP and disable the second factor.
+        var latestTokens = await LoginAndSolveChallengeAsync(client, setup.SharedKey);
+
+        var disable = await client.PostApi(
+            "/api/v1/auth/2fa/disable",
+            new TwoFactorDisableRequest(Totp.Compute(setup.SharedKey, DateTimeOffset.UtcNow)),
+            latestTokens.AccessToken);
+        Assert.Equal(HttpStatusCode.NoContent, disable.StatusCode);
+
+        // Password login is enough again.
+        var plainLogin = await client.PostApi(
+            "/api/v1/auth/login",
+            new LoginRequest("flag-2fa-recovery", "recovery@acme.test", Scenarios.Password));
+
+        Assert.Equal(HttpStatusCode.OK, plainLogin.StatusCode);
+        var plainTokens = await plainLogin.ReadAsync<AuthTokens>();
+        Assert.False(string.IsNullOrWhiteSpace(plainTokens.AccessToken));
+    }
+
+    private static async Task<HttpResponseMessage> VerifyWithRecoveryCodeAsync(
+        HttpClient client,
+        string recoveryCode)
+    {
+        var login = await client.PostApi(
+            "/api/v1/auth/login",
+            new LoginRequest("flag-2fa-recovery", "recovery@acme.test", Scenarios.Password));
+
+        using var json = System.Text.Json.JsonDocument.Parse(await login.Content.ReadAsStringAsync());
+        var challenge = json.RootElement.GetProperty("twoFactorToken").GetString();
+
+        return await client.PostApi(
+            "/api/v1/auth/2fa/verify",
+            new TwoFactorVerifyRequest(challenge!, null, recoveryCode));
+    }
+
+    private static async Task<AuthTokens> LoginAndSolveChallengeAsync(HttpClient client, string sharedKey)
+    {
+        var login = await client.PostApi(
+            "/api/v1/auth/login",
+            new LoginRequest("flag-2fa-recovery", "recovery@acme.test", Scenarios.Password));
+
+        using var json = System.Text.Json.JsonDocument.Parse(await login.Content.ReadAsStringAsync());
+        var challenge = json.RootElement.GetProperty("twoFactorToken").GetString();
+
+        var verify = await client.PostApi(
+            "/api/v1/auth/2fa/verify",
+            new TwoFactorVerifyRequest(
+                challenge!,
+                Totp.Compute(sharedKey, DateTimeOffset.UtcNow),
+                null));
+
+        Assert.Equal(HttpStatusCode.OK, verify.StatusCode);
+        return await verify.ReadAsync<AuthTokens>();
     }
 }

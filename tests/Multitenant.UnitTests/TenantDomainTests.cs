@@ -1,4 +1,3 @@
-using Multitenant.Application.Common;
 using Multitenant.Application.Common.Security;
 using Multitenant.Domain.Entities;
 
