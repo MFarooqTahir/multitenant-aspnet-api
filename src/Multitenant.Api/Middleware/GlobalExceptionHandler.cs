@@ -41,11 +41,13 @@ public sealed partial class GlobalExceptionHandler(
             Detail = detail,
             Instance = httpContext.Request.Path,
             Type = TypeFor(statusCode),
+            Extensions =
+            {
+                ["code"] = code,
+                ["traceId"] = httpContext.TraceIdentifier,
+                ["correlationId"] = httpContext.Items[CorrelationKeys.ItemKey]
+            }
         };
-
-        problem.Extensions["code"] = code;
-        problem.Extensions["traceId"] = httpContext.TraceIdentifier;
-        problem.Extensions["correlationId"] = httpContext.Items[CorrelationKeys.ItemKey];
 
         return await problemDetailsService.TryWriteAsync(new ProblemDetailsContext
         {

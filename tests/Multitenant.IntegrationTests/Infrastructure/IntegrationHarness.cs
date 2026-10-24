@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
-using Multitenant.Api;
+using Testcontainers.PostgreSql;
 
 namespace Multitenant.IntegrationTests.Infrastructure;
 
@@ -20,32 +20,29 @@ public sealed class IntegrationHarness : IDisposable, IAsyncLifetime
 
     private static WebApplicationFactory<Program> _factory = CreateFactory();
 
-    public Task InitializeAsync()
+    public async Task InitializeAsync()
     {
-        Container.Start();
+        await Container.StartAsync();
         ConnectionString = Container.GetConnectionString();
         _factory = CreateFactory();
-
-        return Task.CompletedTask;
     }
 
-    public Task DisposeAsync()
+    public async Task DisposeAsync()
     {
         _factory.Dispose();
-        Container.Stop();
-        return Task.CompletedTask;
+       await Container.StopAsync();
     }
 
     public void Dispose()
     {
-        DisposeAsync().AsTask().GetAwaiter().GetResult();
+        DisposeAsync().GetAwaiter().GetResult();
     }
 
     public static WebApplicationFactory<Program> DefaultFactory => _factory;
 
     public static WebApplicationFactory<Program> CreateFactory(Action<Dictionary<string, string?>>? overrideConfiguration = null)
     {
-        var configuration = new Dictionary<string, string?>(CreateDefaultConfiguration)
+        var configuration = new Dictionary<string, string?>(CreateDefaultConfiguration())
         {
             ["ConnectionStrings:Postgres"] = ConnectionString,
         };
@@ -69,17 +66,13 @@ public sealed class IntegrationHarness : IDisposable, IAsyncLifetime
         ["Serilog:MinimumLevel:Default"] = "Warning",
     };
 
-    private sealed class IntegrationWebApplicationFactory : WebApplicationFactory<Program>
+    private sealed class IntegrationWebApplicationFactory(Dictionary<string, string?> configuration)
+        : WebApplicationFactory<Program>
     {
-        private readonly Dictionary<string, string?> _configuration;
-
-        public IntegrationWebApplicationFactory(Dictionary<string, string?> configuration) =>
-            _configuration = configuration;
-
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Testing");
-            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(_configuration));
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(configuration));
         }
     }
 }

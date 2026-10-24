@@ -46,8 +46,7 @@ builder.Host.UseSerilog((context, services, loggerConfiguration) =>
             loggerConfiguration.WriteTo.ApplicationInsights(
                 telemetryConfiguration,
                 new EventTelemetryConverter(),
-                LogEventLevel.Information,
-                null);
+                LogEventLevel.Information);
         }
     }
 });
@@ -77,7 +76,6 @@ builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services
     .AddApiVersioning(options =>
     {
-        options.DefaultApiVersion = new ApiVersion(1, 0);
         options.ReportApiVersions = true;
         options.ApiVersionReader = new UrlSegmentApiVersionReader();
     })

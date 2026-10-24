@@ -52,11 +52,13 @@ public sealed class ValidationFilter(IServiceProvider services) : IAsyncActionFi
                 Title = "Validation failed",
                 Type = "https://datatracker.ietf.org/doc/html/rfc9110#section-15.5.1",
                 Instance = context.HttpContext.Request.Path,
+                Extensions =
+                {
+                    ["code"] = "validation_failed",
+                    ["traceId"] = context.HttpContext.TraceIdentifier,
+                    ["correlationId"] = context.HttpContext.Items[CorrelationKeys.ItemKey]
+                }
             };
-
-            problem.Extensions["code"] = "validation_failed";
-            problem.Extensions["traceId"] = context.HttpContext.TraceIdentifier;
-            problem.Extensions["correlationId"] = context.HttpContext.Items[CorrelationKeys.ItemKey];
 
             context.Result = new BadRequestObjectResult(problem);
             return;
