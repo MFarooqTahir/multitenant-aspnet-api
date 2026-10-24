@@ -2,6 +2,8 @@
   <Folder Name="/Solution Items/">
     <File Path="compose.yaml" />
     <File Path="Directory.Build.props" />
+    <File Path="HANDOVER.md" />
+    <File Path="README.md" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Multitenant.Api/Multitenant.Api.csproj" />
