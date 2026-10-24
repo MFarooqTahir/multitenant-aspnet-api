@@ -100,7 +100,8 @@ public sealed class AuthLifecycleTests : IntegrationTestBase
 
         var registered = await client.PostApi(
             "/api/v1/auth/register",
-            new RegisterRequest("auth-role", "role-member@acme.test", "Role Member", Scenarios.Password));
+            new RegisterRequest("auth-role", "role-member@acme.test", "Role Member", Scenarios.Password),
+            owner.AccessToken);
         Assert.Equal(HttpStatusCode.Created, registered.StatusCode);
         var member = await registered.ReadAsync<UserResponse>();
         Assert.Equal("Member", member.Role);
@@ -167,7 +168,8 @@ public sealed class AuthLifecycleTests : IntegrationTestBase
 
         var created = await client.PostApi(
             "/api/v1/auth/register",
-            new RegisterRequest("auth-register", "new-member@acme.test", "New Member", Scenarios.Password));
+            new RegisterRequest("auth-register", "new-member@acme.test", "New Member", Scenarios.Password),
+            owner.AccessToken);
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
 
         var member = await created.ReadAsync<UserResponse>();
@@ -178,13 +180,16 @@ public sealed class AuthLifecycleTests : IntegrationTestBase
 
         var duplicate = await client.PostApi(
             "/api/v1/auth/register",
-            new RegisterRequest("auth-register", "new-member@acme.test", "New Member", Scenarios.Password));
+            new RegisterRequest("auth-register", "new-member@acme.test", "New Member", Scenarios.Password),
+            owner.AccessToken);
         Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
 
-        var unknownTenant = await client.PostApi(
+        // An Owner cannot create users in another tenant by supplying its slug.
+        var foreignTenant = await client.PostApi(
             "/api/v1/auth/register",
-            new RegisterRequest("does-not-exist", "nobody@acme.test", "Nobody", Scenarios.Password));
-        Assert.Equal(HttpStatusCode.NotFound, unknownTenant.StatusCode);
+            new RegisterRequest("does-not-exist", "nobody@acme.test", "Nobody", Scenarios.Password),
+            owner.AccessToken);
+        Assert.Equal(HttpStatusCode.Forbidden, foreignTenant.StatusCode);
 
         var users = await client.GetApi("/api/v1/users", owner.AccessToken);
         var page = await users.ReadAsync<PagedResult<UserResponse>>();
@@ -192,14 +197,62 @@ public sealed class AuthLifecycleTests : IntegrationTestBase
     }
 
     [Fact]
+    public async Task RegistrationRequiresATenantAdmin()
+    {
+        using var client = CreateClient();
+        var owner = await Scenarios.OnboardAndLoginAsync(client, "auth-register-guard", "register-guard@acme.test");
+
+        // Anonymous callers can no longer join a tenant by knowing its slug.
+        var anonymous = await client.PostApi(
+            "/api/v1/auth/register",
+            new RegisterRequest("auth-register-guard", "anon@acme.test", "Anon", Scenarios.Password));
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+
+        var created = await client.PostApi(
+            "/api/v1/auth/register",
+            new RegisterRequest("auth-register-guard", "guarded-member@acme.test", "Guarded Member", Scenarios.Password),
+            owner.AccessToken);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+
+        var memberTokens = await Scenarios.LoginAsync(
+            client,
+            "auth-register-guard",
+            "guarded-member@acme.test",
+            Scenarios.Password);
+
+        var forbidden = await client.PostApi(
+            "/api/v1/auth/register",
+            new RegisterRequest("auth-register-guard", "sneaky@acme.test", "Sneaky", Scenarios.Password),
+            memberTokens.AccessToken);
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+    }
+
+    [Fact]
+    public async Task OnboardingLocationResolvesToTheTenant()
+    {
+        using var client = CreateClient();
+        var tenant = await Scenarios.OnboardAsync(client, "auth-location", "Auth Location", "location@acme.test");
+        var tokens = await Scenarios.LoginAsync(client, "auth-location", "location@acme.test");
+
+        var response = await client.GetApi($"/api/v1/tenants/{tenant.Id}", tokens.AccessToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        // Another tenant's id is not reachable, so the endpoint cannot be used to probe.
+        var other = await Scenarios.OnboardAsync(client, "auth-location-other", "Other", "other@acme.test");
+        var notFound = await client.GetApi($"/api/v1/tenants/{other.Id}", tokens.AccessToken);
+        Assert.Equal(HttpStatusCode.NotFound, notFound.StatusCode);
+    }
+
+    [Fact]
     public async Task MembersCannotManageUsers()
     {
         using var client = CreateClient();
-        await Scenarios.OnboardAndLoginAsync(client, "auth-member-guard", "guard-owner@acme.test");
+        var owner = await Scenarios.OnboardAndLoginAsync(client, "auth-member-guard", "guard-owner@acme.test");
 
         var register = await client.PostApi(
             "/api/v1/auth/register",
-            new RegisterRequest("auth-member-guard", "guard-member@acme.test", "Guard Member", Scenarios.Password));
+            new RegisterRequest("auth-member-guard", "guard-member@acme.test", "Guard Member", Scenarios.Password),
+            owner.AccessToken);
         Assert.Equal(HttpStatusCode.Created, register.StatusCode);
 
         var memberTokens = await Scenarios.LoginAsync(

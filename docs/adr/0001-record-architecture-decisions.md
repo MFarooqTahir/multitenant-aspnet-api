@@ -14,8 +14,11 @@ deliberately traded away.
 
 Every architecturally significant decision is captured as a short Architecture Decision
 Record in `docs/adr/`. Records describe context, decision, consequences and alternatives.
-They are append-only: when a decision changes, a new record supersedes the old one instead
-of editing history.
+
+Each record describes the decision the code makes **today**: when a decision changes, the
+record is updated so the docs never describe superseded behaviour. This repository is a
+portfolio piece, not an audit trail, so keeping the set small and accurate matters more than
+preserving every intermediate state. New decisions get a new numbered record.
 
 ## Consequences
 

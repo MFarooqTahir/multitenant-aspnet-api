@@ -25,9 +25,9 @@ public sealed class Tenant
 
     public DateTimeOffset CreatedAtUtc { get; private set; }
 
-    public ICollection<AppUser> Users { get; private set; } = new List<AppUser>();
+    public ICollection<AppUser> Users { get; private set; } = [];
 
-    public ICollection<Project> Projects { get; private set; } = new List<Project>();
+    public ICollection<Project> Projects { get; private set; } = [];
 
     public static Tenant Create(string slug, string name, DateTimeOffset createdAtUtc)
     {

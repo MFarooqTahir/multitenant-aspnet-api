@@ -199,11 +199,12 @@ public sealed class PlatformTests : IntegrationTestBase
     public async Task TenantScopedRolesProtectProjectWrites()
     {
         using var client = CreateClient();
-        await Scenarios.OnboardAndLoginAsync(client, "platform-roles", "platform-owner@acme.test");
+        var owner = await Scenarios.OnboardAndLoginAsync(client, "platform-roles", "platform-owner@acme.test");
 
         var register = await client.PostApi(
             "/api/v1/auth/register",
-            new RegisterRequest("platform-roles", "platform-member@acme.test", "Platform Member", Scenarios.Password));
+            new RegisterRequest("platform-roles", "platform-member@acme.test", "Platform Member", Scenarios.Password),
+            owner.AccessToken);
         Assert.Equal(HttpStatusCode.Created, register.StatusCode);
 
         var member = await Scenarios.LoginAsync(

@@ -418,7 +418,7 @@ namespace Multitenant.Infrastructure.Persistence.Migrations
 
                     b.ToTable("WorkItems", null, t =>
                         {
-                            t.HasCheckConstraint("CK_WorkItems_AssigneeTenant", "\"AssigneeTenantId\" IS NULL OR \"AssigneeTenantId\" = \"TenantId\"");
+                            t.HasCheckConstraint("CK_WorkItems_AssigneeTenant", "(\"AssigneeTenantId\" IS NULL AND \"AssigneeUserId\" IS NULL) OR (\"AssigneeTenantId\" IS NOT NULL AND \"AssigneeUserId\" IS NOT NULL AND \"AssigneeTenantId\" = \"TenantId\")");
                         });
                 });
 

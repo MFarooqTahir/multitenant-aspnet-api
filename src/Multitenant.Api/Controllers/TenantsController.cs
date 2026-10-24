@@ -39,4 +39,24 @@ public sealed class TenantsController(ITenantService tenantService) : Controller
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<TenantResponse>> Current(CancellationToken cancellationToken) =>
         Ok(await tenantService.GetCurrentAsync(cancellationToken));
+
+    /// <summary>
+    /// Returns a tenant by id. Only the caller's own tenant is reachable, so the
+    /// <c>Location</c> header returned by onboarding resolves instead of 404ing.
+    /// </summary>
+    [HttpGet("{id:guid}")]
+    [Authorize(Policy = Policies.Member)]
+    [ProducesResponseType<TenantResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<TenantResponse>> Get(Guid id, CancellationToken cancellationToken)
+    {
+        var tenant = await tenantService.GetCurrentAsync(cancellationToken);
+
+        if (tenant.Id != id)
+        {
+            return NotFound();
+        }
+
+        return Ok(tenant);
+    }
 }

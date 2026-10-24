@@ -33,8 +33,9 @@ Content-Type: application/json
   "password": "{{password}}"
 }
 
-### Register (self-service Member) into an existing tenant
+### Add a Member to your tenant (Owner/Admin only)
 POST {{api}}/auth/register
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {

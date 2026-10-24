@@ -1,5 +1,8 @@
 # Architecture
 
+This document describes the system as it is today. Decisions and their rationale live in
+`docs/adr/`; the product-level walkthrough and endpoint reference live in `README.md`.
+
 ## System context
 
 ```mermaid
@@ -52,10 +55,12 @@ sequenceDiagram
 
     C->>A: POST /api/v1/auth/login (tenantSlug, email, password)
     A->>S: LoginAsync
-    S->>D: resolve tenant by slug
+    S->>D: resolve tenant by slug (active only)
     S->>D: find user by TenantId + NormalizedEmail (IgnoreQueryFilters + explicit tenant)
     S->>I: CheckPasswordSignInAsync (lockout on failure)
     I-->>S: success
+    S->>S: require confirmed email when Identity:RequireConfirmedEmail is on
+    S->>S: optional 2FA challenge when the user has TOTP enrolled
     S->>I: UpdateSecurityStampAsync (single-session default)
     S->>D: revoke other refresh tokens
     S->>D: store SHA-256 hash of new refresh token
@@ -68,17 +73,43 @@ sequenceDiagram
     A-->>C: 200 or 401 if the stamp/role changed
 ```
 
+Two ordering rules matter here:
+
+- The email-confirmation check runs **after** the password, so `403 email_not_confirmed`
+  cannot be used to enumerate addresses.
+- The tenant context is set before password verification, because a failed attempt writes
+  lockout counters and the write guard needs a resolved tenant.
+
 ## Refresh-token rotation
 
 ```mermaid
 stateDiagram-v2
     [*] --> Active: login or refresh
-    Active --> Rotated: refresh (new token in same family)
+    Active --> Rotated: refresh (new token in the same family)
     Rotated --> TheftDetected: old token presented again
     TheftDetected --> RevokedFamily: revoke every token in the family
     Active --> Revoked: logout / logout-all / single-session login
     Active --> Expired: 30 days
 ```
+
+A refresh is rejected when the flag `Identity:RequireConfirmedEmail` is on and the account is
+still unconfirmed, so sessions minted before the flag was enabled cannot outlive it.
+
+## Tenant isolation
+
+Three layers, each independent of the others:
+
+1. **Read** — EF Core global query filters on `AppUser`, `Project` and `WorkItem`. The filter
+   reads `AppDbContext.CurrentTenantId` (a `DbContext` property, not a captured service), so
+   EF's model cache stays valid.
+2. **Write** — `TenantAuditingInterceptor` stamps `TenantId` on inserts and rejects writes whose
+   tenant differs from the resolved one.
+3. **Referential** — composite foreign keys on `(TenantId, Id)` for projects and task
+   assignees, plus `CK_WorkItems_AssigneeTenant`, which requires both assignee columns to be set
+   together (the composite FK is MATCH SIMPLE, so a NULL would otherwise skip the check).
+
+Cross-tenant reads and writes return **404**, never 403, so the API does not confirm that a
+resource exists in another tenant.
 
 ## Data model
 
@@ -109,11 +140,13 @@ erDiagram
         bool TwoFactorEnabled
         varchar SecurityStamp
         bool IsActive
+        timestamptz CreatedAtUtc
     }
     Projects {
         uuid Id PK
         uuid TenantId FK
         varchar Name
+        varchar Description
         varchar Status
         timestamptz CreatedAtUtc
         timestamptz UpdatedAtUtc
@@ -123,11 +156,14 @@ erDiagram
         uuid TenantId FK
         uuid ProjectId FK
         varchar Title
+        varchar Description
         varchar Status
         varchar Priority
+        date DueDate
         uuid AssigneeUserId FK
         uuid AssigneeTenantId
-        date DueDate
+        timestamptz CreatedAtUtc
+        timestamptz UpdatedAtUtc
     }
     RefreshTokens {
         uuid Id PK
@@ -135,16 +171,23 @@ erDiagram
         uuid TenantId
         varchar TokenHash UK
         uuid FamilyId
+        timestamptz CreatedAtUtc
         timestamptz ExpiresAtUtc
         timestamptz RevokedAtUtc
         uuid ReplacedByTokenId
+        varchar CreatedByIp
+        varchar RevokedReason
     }
 ```
 
 `AspNetRoleClaims`, `AspNetUserClaims`, `AspNetUserLogins`, `AspNetUserTokens` and
 `AspNetUserPasskeys` are the standard Identity tables and are omitted for readability.
-`Projects` also has a unique alternate key on `(TenantId, Id)` so `WorkItems` can reference
-it with the composite `(TenantId, ProjectId)` foreign key.
+`AspNetUsers` and `Projects` also carry a unique alternate key on `(TenantId, Id)` so
+`WorkItems` can reference them with composite foreign keys.
+
+Schema and demo data are created by the single migration
+`Persistence/Migrations/20261024230047_InitialCreate`, applied automatically when
+`Database:AutoMigrate` is on.
 
 ## Where to look
 
@@ -157,6 +200,7 @@ it with the composite `(TenantId, ProjectId)` foreign key.
 | User creation (registration + admin) | `src/Multitenant.Infrastructure/Identity/UserProvisioningService.cs` |
 | Refresh token hashing/rotation helpers | `src/Multitenant.Infrastructure/Identity/RefreshTokenManager.cs` |
 | Tenant onboarding transaction | `src/Multitenant.Infrastructure/Services/TenantService.cs` |
+| User/role rules (last-Owner guard) | `src/Multitenant.Infrastructure/Services/UserService.cs` |
 | Error contract | `src/Multitenant.Api/Middleware/GlobalExceptionHandler.cs` |
 | Rate limiting | `src/Multitenant.Api/RateLimiting/RateLimitingSetup.cs` |
 | Demo seeding | `src/Multitenant.Infrastructure/Persistence/DatabaseInitializer.cs` |

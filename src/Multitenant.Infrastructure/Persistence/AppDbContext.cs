@@ -91,9 +91,15 @@ public sealed class AppDbContext(
 
         builder.Entity<WorkItem>(entity =>
         {
+            // The composite assignee FK is MATCH SIMPLE: a NULL in either column
+            // skips the reference check entirely. Requiring both columns to be set
+            // together closes the hole where a NULL AssigneeTenantId paired with
+            // another tenant's user id was accepted by the database.
             entity.ToTable("WorkItems", table => table.HasCheckConstraint(
                 "CK_WorkItems_AssigneeTenant",
-                "\"AssigneeTenantId\" IS NULL OR \"AssigneeTenantId\" = \"TenantId\""));
+                "(\"AssigneeTenantId\" IS NULL AND \"AssigneeUserId\" IS NULL)"
+                + " OR (\"AssigneeTenantId\" IS NOT NULL AND \"AssigneeUserId\" IS NOT NULL"
+                + " AND \"AssigneeTenantId\" = \"TenantId\")"));
 
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Title).HasMaxLength(200).IsRequired();

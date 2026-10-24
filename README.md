@@ -33,9 +33,10 @@ It onboards two tenants, creates data as Tenant A, then proves Tenant B gets `40
 update and delete on A's projects and tasks. No mocks, no in-memory database — a real
 PostgreSQL instance via Testcontainers.
 
-Prefer clicking? `docker compose up --build`, then use the two seeded tenants (`acme` and
+Prefer clicking? `docker compose up --build`, then use the two demo tenants (`acme` and
 `globex`) from the demo table below: log in as each owner and try to fetch the other tenant's
-project id.
+project id. Demo seeding is opt-in, so set `SEED_DEMO_DATA=true` and a `DEMO_PASSWORD` of your
+choosing in `.env` first.
 
 ---
 
@@ -91,7 +92,7 @@ non-obvious decision is written down.
 
 - Tenant provisioning in one transaction: tenant, owner account, role, starter project and
   tasks either all exist or none do.
-- Two demo tenants are seeded on first run (`acme`, `globex`).
+- Demo tenants (`acme`, `globex`) are seeded only when demo seeding is explicitly enabled.
 - Tenant resolution from the JWT `tenant_id` claim; no subdomain or header trust.
 - Global query filters for reads, a `SaveChanges` guard for writes, a composite
   `(TenantId, ProjectId)` foreign key for referential integrity.
@@ -163,8 +164,8 @@ mistake in one layer does not become a data leak:
 
 1. **The tenant is never a client input for authenticated calls.** `JwtBearerConfiguration`
    reads `tenant_id` from the validated token and calls `ITenantContext.SetTenant` before any
-   query runs. Anonymous flows (login, refresh, registration, onboarding) resolve the tenant
-   explicitly from the slug or the refresh token.
+   query runs. Anonymous flows (login, refresh, onboarding) resolve the tenant explicitly from
+   the slug or the refresh token.
 2. **Reads are filtered.** `AppUser`, `Project` and `WorkItem` carry a global EF Core query
    filter on `TenantId`. The filter references `AppDbContext.CurrentTenantId` rather than the
    injected `ITenantContext` closure, because EF caches the model per context type — a
@@ -175,8 +176,10 @@ mistake in one layer does not become a data leak:
 4. **The database knows about tenancy.** `WorkItems` references `Projects` on
    `(TenantId, ProjectId)`, and `Projects` has an alternate key on `(TenantId, Id)`. A task's
    assignee is protected the same way: `(AssigneeTenantId, AssigneeUserId)` references
-   `AppUser (TenantId, Id)`, and a check constraint requires `AssigneeTenantId = TenantId`.
-   Cross-tenant links are therefore impossible even with direct SQL, not just through the API.
+   `AppUser (TenantId, Id)`, and a check constraint requires both assignee columns to be set
+   together with `AssigneeTenantId = TenantId` (the composite key is MATCH SIMPLE, so a NULL
+   would otherwise skip the reference check). Cross-tenant links are therefore impossible even
+   with direct SQL, not just through the API.
 5. **The API hides existence.** A cross-tenant id produces `404` from the filtered query, not
    `403`.
 
@@ -296,10 +299,11 @@ with the settings under `Email:Smtp`.
 
 There are three supported paths:
 
-1. **Self-service registration into an existing tenant** (anonymous, rate limited):
+1. **A tenant Owner or Admin adds a Member** (authenticated, Owner/Admin only):
 
    ```http
    POST /api/v1/auth/register
+   Authorization: Bearer <access-token>
    Content-Type: application/json
 
    {
@@ -310,8 +314,14 @@ There are three supported paths:
    }
    ```
 
-   The user is created as `Member`, receives a confirmation email (logged in development),
-   and can log in immediately unless `Identity:RequireConfirmedEmail` is on.
+   The caller must be an Owner or Admin of the tenant named by `tenantSlug`; any other slug
+   returns `403 tenant_mismatch`. The user is created as `Member`, receives a confirmation email
+   (logged in development), and can log in immediately unless `Identity:RequireConfirmedEmail`
+   is on.
+
+   Anonymous self-service joining by slug is deliberately **not** supported: knowing a tenant
+   slug must not be enough to read that tenant's data. Public sign-up, if you need it, belongs in
+   an explicit invite or email-domain allow-list flow rather than an open endpoint.
 
    Internally this path and the admin path below call the same
    `IUserProvisioningService`, so email-uniqueness checks, Identity creation, role
@@ -354,7 +364,7 @@ Base path: `/api/v1`. All timestamps are UTC. Errors are `application/problem+js
 | Method | Route | Auth | Purpose |
 | --- | --- | --- | --- |
 | POST | `/auth/login` | anonymous, IP-limited | Password login, optional 2FA challenge |
-| POST | `/auth/register` | anonymous, IP-limited | Join an existing tenant as Member |
+| POST | `/auth/register` | Owner/Admin | Add a Member to your own tenant |
 | POST | `/auth/refresh` | anonymous, IP-limited | Rotate refresh token, issue new pair |
 | POST | `/auth/logout` | bearer | Revoke one refresh token |
 | POST | `/auth/logout-all` | bearer | Revoke all sessions and access tokens |
@@ -371,6 +381,7 @@ Base path: `/api/v1`. All timestamps are UTC. Errors are `application/problem+js
 | --- | --- | --- | --- |
 | POST | `/tenants/onboard` | anonymous, IP-limited | Provision tenant + owner + starter data |
 | GET | `/tenants/current` | member | Tenant resolved from the token |
+| GET | `/tenants/{id}` | member | Your own tenant by id (the onboarding `Location` target); other ids return `404` |
 
 ### Users
 
@@ -459,8 +470,8 @@ Configuration is standard ASP.NET Core: `appsettings.json`, then
 | `RateLimiting:Auth:PermitLimit` | `10` | Requests per window per IP |
 | `RateLimiting:Auth:WindowSeconds` | `60` | |
 | `Database:AutoMigrate` | `false` | Apply migrations on startup (dev/demo) |
-| `Database:SeedDemoData` | `false` | Seed roles + `acme`/`globex` |
-| `Demo:Password` | empty | Password for seeded demo users |
+| `Database:SeedDemoData` | `false` | Seed roles + `acme`/`globex`; requires `Demo:Password` and fails fast without it |
+| `Demo:Password` | empty | Password for seeded demo users (required when `SeedDemoData=true`) |
 | `Cors:AllowedOrigins` | `[]` | Empty disables CORS. When set, only standard headers/methods are allowed and credentials are disabled |
 | `Serilog:MinimumLevel:*` | `Information` | Standard Serilog overrides |
 | `Serilog:AzureMonitor:ConnectionString` | empty | When set, also logs to Application Insights |
@@ -493,6 +504,62 @@ Production values must come from environment variables or a secret store. `Jwt:S
 - PostgreSQL 16, or Docker Desktop
 - Optional: `dotnet-ef` (`dotnet tool install --global dotnet-ef --version 10.*`)
 
+### Local database (one container, reused for every run)
+
+You do **not** need to create a database, run migrations or seed by hand, and nothing is
+recreated between runs. Local development uses a single PostgreSQL container whose data lives in
+the named volume `postgres-data`:
+
+```bash
+# 1. One-time: create .env and generate a signing key (compose requires it)
+cp .env.example .env
+openssl rand -base64 48          # paste into JWT_SIGNING_KEY
+# Windows alternative:
+#   $b = New-Object byte[] 48; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
+#   [Convert]::ToBase64String($b)
+
+# 2. Start just PostgreSQL (listens on 127.0.0.1:5432 only)
+docker compose up -d postgres
+
+# 3. Run the API — it connects, creates the DB if missing, migrates and seeds
+dotnet run --project src/Multitenant.Api --launch-profile http
+```
+
+`JWT_SIGNING_KEY` is required by `compose.yaml` for **every** compose command (compose validates
+the whole file, not just the service you start), so step 1 is needed even when you only want
+PostgreSQL. `docker compose` fails fast rather than starting with an empty key.
+
+Then open <http://localhost:5270/scalar> and log in as `owner@acme.test` /
+`Demo123!Passw0rd`.
+
+What happens on that first start:
+
+- `src/Multitenant.Api/appsettings.Development.json` supplies the connection string
+  `Host=localhost;Port=5432;Database=multitenantDb;Username=multitenant-DbUser;Password=multitenant-DbPassword123!`
+  — the same credentials as the compose container, so Docker and `dotnet run` share one database.
+- `Database:AutoMigrate=true` applies every pending migration (and creates `multitenantDb` if it
+  does not exist yet).
+- `Database:SeedDemoData=true` + `Demo:Password` insert the `acme`/`globex` demo tenants once;
+  later starts detect the existing slugs and leave them untouched.
+
+Subsequent runs reuse exactly the same database and data. To start over from scratch, delete the
+volume: `docker compose down -v` (this is the only command that discards data).
+
+A fresh clone has no `appsettings.Development.json` (it is git-ignored). Create it with:
+
+```json
+{
+  "ConnectionStrings": {
+    "Postgres": "Host=localhost;Port=5432;Database=multitenantDb;Username=multitenant-DbUser;Password=multitenant-DbPassword123!"
+  },
+  "Jwt": { "SigningKey": "<32+ character random string>" },
+  "Demo": { "Password": "Demo123!Passw0rd" },
+  "Database": { "AutoMigrate": true, "SeedDemoData": true }
+}
+```
+
+These values are for local development only; production must come from a secret store.
+
 ### Option A — Docker Compose (one command)
 
 ```bash
@@ -500,8 +567,12 @@ cp .env.example .env       # edit JWT_SIGNING_KEY and passwords
 docker compose up --build
 ```
 
-The API waits for PostgreSQL, applies migrations and seeds demo data (Development defaults),
-then listens on <http://localhost:8080>. Scalar is at <http://localhost:8080/scalar>.
+The API waits for PostgreSQL and applies migrations, then listens on
+<http://localhost:8080>. Scalar is at <http://localhost:8080/scalar>.
+
+Demo seeding is opt-in: set `SEED_DEMO_DATA=true` and `DEMO_PASSWORD=<your password>` in `.env`
+to create the `acme`/`globex` tenants. Without them the database starts clean and you create the
+first tenant with `POST /api/v1/tenants/onboard`.
 
 ### Option B — local `dotnet run` with your own PostgreSQL
 
@@ -523,8 +594,9 @@ then listens on <http://localhost:8080>. Scalar is at <http://localhost:8080/sca
    dotnet run --project src/Multitenant.Api
    ```
 
-   In Development `Database:AutoMigrate` and `Database:SeedDemoData` are `true`, so the schema
-   and demo tenants are created automatically. The HTTP profile listens on
+   With `Database:AutoMigrate=true` (as in the exports above) the schema is created on startup;
+   `Database:SeedDemoData=true` plus `Demo:Password` additionally creates the demo tenants. The
+   HTTP profile listens on
    <http://localhost:5270>; the `https` profile also exposes <https://localhost:7073>.
 
 3. Open <http://localhost:5270/scalar> or the raw document at
@@ -532,7 +604,10 @@ then listens on <http://localhost:8080>. Scalar is at <http://localhost:8080/sca
 
 ### Demo accounts
 
-Both tenants use the password `Demo123!Passw0rd` (configurable through `Demo:Password`):
+Only created when demo seeding is enabled (`Database:SeedDemoData=true`, or `SEED_DEMO_DATA=true`
+for compose) **and** `Demo:Password` / `DEMO_PASSWORD` is set — startup fails if the seed is
+requested without a password. Both tenants use that password: they are not seeded with a
+built-in default, so a stack started without these settings has no known-credential accounts.
 
 | Tenant | Email | Role |
 | --- | --- | --- |
@@ -542,6 +617,9 @@ Both tenants use the password `Demo123!Passw0rd` (configurable through `Demo:Pas
 | `globex` | `member@globex.test` | Member |
 
 ### Migrations
+
+The schema is a single squashed migration (`InitialCreate`) covering every table, index,
+alternate key and check constraint. Change the model, then add a migration on top of it:
 
 ```bash
 # Add a migration (design-time factory is in Infrastructure)
@@ -590,7 +668,7 @@ password rules), pagination/sorting (including offset overflow), claim generatio
 challenge validation and refresh token hashing. They run in milliseconds and need no
 infrastructure.
 
-**Integration tests** (`tests/Multitenant.IntegrationTests`, 51 tests) boot the real API with
+**Integration tests** (`tests/Multitenant.IntegrationTests`, 54 tests) boot the real API with
 `WebApplicationFactory<IApiMarker>` against a real PostgreSQL 16 container managed by
 Testcontainers. They cover:
 
@@ -633,8 +711,15 @@ before restoring so the container build matches local builds.
 ASPNETCORE_ENVIRONMENT: Development
 Jwt__SigningKey: ${JWT_SIGNING_KEY:?...}
 Database__AutoMigrate: "true"
-Database__SeedDemoData: "true"
+Database__SeedDemoData: ${SEED_DEMO_DATA:-false}
+Demo__Password: ${DEMO_PASSWORD:-}
 ```
+
+The compose stack binds PostgreSQL to `127.0.0.1:5432` (loopback only) and keeps its data in the
+`postgres-data` volume, so `docker compose up -d postgres` gives `dotnet run` a database that is
+reused across restarts without being reachable from other machines. The default database
+password is a development-only convenience: override `POSTGRES_PASSWORD` (see `.env.example`) for
+anything shared.
 
 Production deployments should:
 
@@ -662,7 +747,8 @@ Production deployments should:
    `ghcr.io/<owner>/<repo>` using GitHub Container Registry, with branch, SHA, semver and
    `latest` tags.
 
-The intended release tag is **`v1.0.0`**, which produces container tags `1.0.0` and `1.0`.
+The current release is **`v1.0.1`**, which produces container tags `1.0.1` and `1.0` (`latest`
+follows the default branch).
 
 To enable the image, keep the workflow's default `GITHUB_TOKEN` permissions as declared
 (`packages: write`) or add a `CR_PAT`. No repository secrets are required for tests.
@@ -705,6 +791,7 @@ fields @timestamp, @message
 - [0005 — Email confirmation and 2FA are opt-in](docs/adr/0005-identity-feature-flags.md)
 - [0006 — Per-tenant rate limiting](docs/adr/0006-rate-limiting.md)
 - [0007 — Structured logging and RFC 7807 errors](docs/adr/0007-observability.md)
+- [0008 — Registration is a tenant-admin action](docs/adr/0008-admin-only-registration.md)
 
 ### What changes at 10x scale
 
@@ -732,6 +819,8 @@ The current design is deliberately single-node and single-database. At 10x traff
 .
 ├── .github/workflows/ci.yml           build, test, publish to GHCR
 ├── .env.example                       compose environment template
+├── README.md                          product, API and setup guide
+├── HANDOVER.md                        engineering handover for the next agent
 ├── compose.yaml                       PostgreSQL + API for local runs
 ├── Directory.Build.props              shared compiler/analyser settings
 ├── global.json                        SDK pin
@@ -783,9 +872,9 @@ Migrations live in `src/Multitenant.Infrastructure/Persistence/Migrations`.
 
 These are deliberate scope cuts, not oversights:
 
-- **Registration by slug** lets anyone who knows a tenant slug join as a Member. A production
-  system would use signed invites (email domain allow-lists or an Owner-issued token). The
-  admin path (`POST /users`) is already constrained; this is the one open door.
+- **No public sign-up.** `POST /auth/register` is restricted to a tenant's Owners and Admins,
+  so there is no invite or open-join flow at all. A product that needs public sign-up should
+  add signed invites or an email-domain allow-list rather than relaxing that endpoint.
 - **Refresh tokens are not garbage-collected.** Expired rows accumulate; a scheduled cleanup
   or a retention job is needed.
 - **Rate limiting is in-process.** With multiple replicas the effective limit is per replica;

@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -62,7 +61,12 @@ public static class DependencyInjection
             .AddIdentityCore<AppUser>(options =>
             {
                 options.User.RequireUniqueEmail = false;
-                options.User.AllowedUserNameCharacters += ":";
+
+                // The user name is an internal "{slug}:{email}" key, not a login
+                // identifier: uniqueness comes from the store. Identity's default
+                // character whitelist would reject valid addresses containing
+                // apostrophes, ampersands or non-ASCII characters, so it is disabled.
+                options.User.AllowedUserNameCharacters = string.Empty;
 
                 // One source of truth for the password policy: the same constants
                 // feed FluentValidation and Identity.
@@ -81,13 +85,16 @@ public static class DependencyInjection
             .AddSignInManager()
             .AddDefaultTokenProviders();
 
-        // Identity's own options are configured from the feature flags so the
-        // behaviour of the API and the Identity primitives cannot drift apart.
+        // Identity's own sign-in gates stay off on purpose. SignInManager checks
+        // them before the password, which would let an anonymous caller tell an
+        // unconfirmed address (403 email_not_confirmed) from an unknown one (401).
+        // AuthService enforces Identity:RequireConfirmedEmail explicitly, after the
+        // password has been verified.
         services.AddOptions<IdentityOptions>()
-            .Configure<IOptions<IdentityFeatureOptions>>((identity, features) =>
+            .Configure(identity =>
             {
-                identity.SignIn.RequireConfirmedEmail = features.Value.RequireConfirmedEmail;
-                identity.SignIn.RequireConfirmedAccount = features.Value.RequireConfirmedEmail;
+                identity.SignIn.RequireConfirmedEmail = false;
+                identity.SignIn.RequireConfirmedAccount = false;
                 identity.Tokens.AuthenticatorTokenProvider = TokenOptions.DefaultAuthenticatorProvider;
             });
 

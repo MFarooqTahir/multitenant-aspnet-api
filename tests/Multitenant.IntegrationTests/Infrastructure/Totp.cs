@@ -72,6 +72,6 @@ public static class Totp
             output.Add((byte)((buffer >> bitsLeft) & 0xFF));
         }
 
-        return output.ToArray();
+        return [.. output];
     }
 }

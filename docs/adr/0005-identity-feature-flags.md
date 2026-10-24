@@ -18,9 +18,13 @@ Implement both flows end-to-end and gate them behind configuration:
 | `Identity:RequireConfirmedEmail` | `false` | Login is allowed for unconfirmed users; the confirmation email is still generated and sent. |
 | `Identity:EnableTwoFactor` | `false` | TOTP setup/enable/disable/verify endpoints return `404 feature_disabled`; login never asks for a second factor. |
 
-Identity's own options (`SignIn.RequireConfirmedEmail`, `SignIn.RequireConfirmedAccount`,
-the authenticator token provider) are configured from the same flags, so the API and the
-Identity primitives cannot drift.
+`Identity:RequireConfirmedEmail` is enforced by `AuthService`, not by Identity's own
+`SignIn.RequireConfirmedEmail`/`RequireConfirmedAccount` gates, which stay off. `SignInManager`
+evaluates those gates *before* the password, which made an unconfirmed address answer `403`
+and an unknown one `401` — an enumeration oracle for anonymous callers. The explicit check
+runs after the password succeeds, and `RefreshAsync` applies it as well so sessions minted
+while confirmation was optional cannot outlive the flag being switched on. The authenticator
+token provider still comes from Identity's options.
 
 Email delivery is provider-based: `Logging` (default, writes the message to the log) and
 `Smtp` (MailKit, configured under `Email:Smtp`). Swapping to SES or Azure Communication

@@ -16,5 +16,5 @@ public sealed class Project : ITenantOwned, IHasTimestamps
 
     public DateTimeOffset UpdatedAtUtc { get; set; }
 
-    public ICollection<WorkItem> Tasks { get; set; } = new List<WorkItem>();
+    public ICollection<WorkItem> Tasks { get; set; } = [];
 }

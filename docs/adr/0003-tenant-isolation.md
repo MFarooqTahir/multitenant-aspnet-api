@@ -26,7 +26,10 @@ Use a shared schema with `TenantId` on every tenant-owned table, enforced at sev
    inserts/updates/deletes whose `TenantId` differs from the resolved tenant.
 4. **Referential isolation** — `WorkItem → Project` uses a composite foreign key on
    `(TenantId, ProjectId)`, and `WorkItem → AppUser` uses `(AssigneeTenantId, AssigneeUserId)`
-   with a check constraint requiring `AssigneeTenantId = TenantId`. A task cannot reference
+   with a check constraint requiring both assignee columns to be set together *and*
+   `AssigneeTenantId = TenantId`. The both-or-neither clause matters because the composite
+   foreign key is MATCH SIMPLE: a NULL in either column would otherwise skip the reference
+   check entirely and let a task point at another tenant's user. A task cannot reference
    another tenant's project or user even if the application guard were bypassed.
 5. **API semantics** — cross-tenant reads and writes return **404**, not 403, so the API
    does not confirm that a resource exists in another tenant.

@@ -43,13 +43,21 @@ public sealed class TenantIntegrityTests : IntegrationTestBase
             alphaProject.Id,
             betaOwner.Id,
             beta.Id);
+
+        // Attempt 3: a NULL assignee tenant skipped the MATCH SIMPLE composite FK
+        // entirely, so another tenant's user id was accepted.
+        await AssertAssignmentRejectedAsync(
+            alpha,
+            alphaProject.Id,
+            betaOwner.Id,
+            assigneeTenantId: null);
     }
 
     private async Task AssertAssignmentRejectedAsync(
         TenantResponse tenant,
         Guid projectId,
         Guid assigneeUserId,
-        Guid assigneeTenantId)
+        Guid? assigneeTenantId)
     {
         using var scope = Harness.Factory.Services.CreateScope();
         var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();

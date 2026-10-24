@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 using Multitenant.Application.Abstractions.Tenancy;
 using Multitenant.Application.Common;
 using Multitenant.Application.Contracts.Users;
@@ -85,6 +86,21 @@ public sealed partial class UserProvisioningService(
                 await transaction.CommitAsync(cancellationToken);
             }
         }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                LogProvisioningRolledBack(logger, user.Id);
+            }
+
+            // A concurrent request created the same account between the pre-check
+            // above and the insert. Report the same conflict as the pre-check
+            // instead of letting the unique index surface as a 500.
+            throw new ConflictException(
+                "A user with that email already exists in this tenant.",
+                "email_taken");
+        }
         catch
         {
             if (transaction is not null)
@@ -107,6 +123,9 @@ public sealed partial class UserProvisioningService(
             role,
             user.IsActive,
             user.CreatedAtUtc);
+
+    private static bool IsUniqueViolation(DbUpdateException exception) =>
+        exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
 
     private static void EnsureSucceeded(IdentityResult result, string code)
     {

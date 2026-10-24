@@ -19,7 +19,8 @@ stricter named policy:
   back to the client IP for anonymous requests. Because the partition key is the tenant, one
   tenant exhausting its budget cannot affect another.
 - **`auth` policy** — 10 requests/minute partitioned by client IP, applied to login,
-  refresh, register, resend-confirmation, two-factor verification and tenant onboarding.
+  refresh, resend-confirmation, two-factor verification and tenant onboarding, plus
+  `POST /auth/register` (authenticated, but kept on the stricter budget as defence in depth).
   It runs alongside the global limiter, giving auth endpoints the stricter of the two.
 
 Options are resolved per request from `IOptions<RateLimitingOptions>`, so configuration

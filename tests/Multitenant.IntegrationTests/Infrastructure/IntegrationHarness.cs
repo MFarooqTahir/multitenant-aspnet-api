@@ -67,18 +67,12 @@ public sealed class IntegrationHarness : IDisposable, IAsyncLifetime
         ["Serilog:MinimumLevel:Default"] = "Warning",
     };
 
-    private sealed class IntegrationWebApplicationFactory : WebApplicationFactory<IApiMarker>
+    private sealed class IntegrationWebApplicationFactory(
+        Dictionary<string, string?> configuration,
+        Action<IServiceCollection>? configureServices) : WebApplicationFactory<IApiMarker>
     {
-        private readonly Dictionary<string, string?> _configuration;
-        private readonly Action<IServiceCollection>? _configureServices;
-
-        public IntegrationWebApplicationFactory(
-            Dictionary<string, string?> configuration,
-            Action<IServiceCollection>? configureServices)
-        {
-            _configuration = configuration;
-            _configureServices = configureServices;
-        }
+        private readonly Dictionary<string, string?> _configuration = configuration;
+        private readonly Action<IServiceCollection>? _configureServices = configureServices;
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {

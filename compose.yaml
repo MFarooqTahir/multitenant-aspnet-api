@@ -5,8 +5,12 @@
       POSTGRES_USER: ${POSTGRES_USER:-multitenant-DbUser}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-multitenant-DbPassword123!}
       POSTGRES_DB: ${POSTGRES_DB:-multitenantDb}
+    # Bound to loopback on purpose: `dotnet run` can still use it on
+    # localhost:5432, but the database is not reachable from the LAN/Internet.
+    # The data lives in the named volume below, so restarts and rebuilds reuse
+    # the same database instead of creating a new one.
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -29,11 +33,18 @@
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       ASPNETCORE_HTTP_PORTS: 8080
       ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-multitenantDb};Username=${POSTGRES_USER:-multitenant-DbUser};Password=${POSTGRES_PASSWORD:-multitenant-DbPassword123!}"
+      # Required: compose refuses to start without a real key, so the stack can
+      # never run with a forged-token-friendly default. `cp .env.example .env`
+      # and generate one (openssl rand -base64 48).
       Jwt__SigningKey: ${JWT_SIGNING_KEY:?JWT_SIGNING_KEY must be set in .env}
-      Demo__Password: ${DEMO_PASSWORD:-Demo123!Passw0rd}
+      # Demo seeding is opt-in: without an explicit SEED_DEMO_DATA=true and a
+      # DEMO_PASSWORD of your choosing, no accounts with known credentials exist.
+      Demo__Password: ${DEMO_PASSWORD:-}
       Database__AutoMigrate: "true"
-      Database__SeedDemoData: "true"
+      Database__SeedDemoData: ${SEED_DEMO_DATA:-false}
       Auth__PublicBaseUrl: "http://localhost:${API_PORT:-8080}"
 
 volumes:
+  # Named volume: the database survives `down`, rebuilds and container restarts.
+  # `docker compose down -v` is the only thing that deletes it.
   postgres-data:

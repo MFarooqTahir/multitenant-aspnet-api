@@ -10,12 +10,11 @@ A practical guide for the next engineer or AI agent picking up this repository.
 | --- | --- |
 | Build | `dotnet build multitenant-aspnet-api.slnx` succeeds with 0 warnings (warnings are errors) |
 | Unit tests | 32 passing |
-| Integration tests | 51 passing against Testcontainers PostgreSQL 16 |
+| Integration tests | 54 passing against Testcontainers PostgreSQL 16 |
 | API surface | Auth, tenants, users, projects, tasks, health, OpenAPI |
-| Migrations | `Persistence/Migrations/20261024141223_InitialCreate` applied automatically in Development |
+| Migrations | One squashed `InitialCreate` migration, applied automatically in Development |
 | Docker | `Dockerfile` and `compose.yaml` are current; image builds |
-| CI | `.github/workflows/ci.yml` builds, tests and publishes to GHCR on `main`/tags |
-| Release tag | Intended `v1.0.0` (create after merge) |
+| CI | `.github/workflows/ci.yml` builds, tests and publishes to GHCR on `main`/`master` and tags |
 
 Nothing in the working tree is intentionally half-finished. The "known limitations" section in
 `README.md` is the authoritative backlog.
@@ -28,7 +27,7 @@ Read these before changing anything touching data or auth.
 
 1. **Tenant context is not optional.** Every tenant-owned write requires
    `ITenantContext.IsResolved`. Authenticated requests get it from the JWT via
-   `JwtBearerConfiguration`; anonymous flows (login, refresh, registration, onboarding) must
+   `JwtBearerConfiguration`; anonymous flows (login, refresh, onboarding) must
    call `SetTenant` before touching tenant-owned tables. `ITenantContext` exists only because
    query filters and the write guard cannot be handed a tenant by each caller — data access
    itself always goes through `AppDbContext`. There is deliberately no tenant repository.
@@ -46,16 +45,21 @@ Read these before changing anything touching data or auth.
 6. **Cross-tenant resources return 404.** Do not "improve" this to 403; it leaks existence.
 7. **Create users in one place.** Both `POST /auth/register` and `POST /users` call
    `IUserProvisioningService`; add email sending at the call site (onboarding sends only
-   after its transaction commits).
-8. **One type per file, namespace mirrors the folder.** New interfaces go in
+   after its transaction commits). `POST /auth/register` is Owner/Admin only and validates the
+   slug against the caller's own tenant — never make it anonymous again: a slug is not a
+   credential, and open joining exposes the tenant's data.
+8. **The last Owner is protected by a lock, not just a count.** `UserService` opens a
+   transaction and takes `SELECT ... FOR UPDATE` on the tenant row before counting Owners, so
+   two concurrent demotions/deletions cannot both pass the guard.
+9. **One type per file, namespace mirrors the folder.** New interfaces go in
    `Application/Abstractions/<Area>` (Identity, Messaging, Tenancy), DTOs in
    `Contracts/<Feature>`, validators in `Validation/<Feature>`, options in
    `Configuration/<Section>`, and exceptions in `Errors/Exceptions`. The namespace is the
    folder path (`Multitenant.Application.Contracts.Auth`, `Multitenant.Application.Configuration.Jwt`),
    and Rider's namespace check should stay clean.
-9. **Migrations are generated from the Infrastructure project**, not the API:
+10. **Migrations are generated from the Infrastructure project**, not the API:
    `dotnet ef migrations add X --project src/Multitenant.Infrastructure --startup-project src/Multitenant.Infrastructure --output-dir Persistence/Migrations`.
-10. **Analyzers are strict.** `TreatWarningsAsErrors=true` and `AnalysisLevel=latest-recommended`.
+11. **Analyzers are strict.** `TreatWarningsAsErrors=true` and `AnalysisLevel=latest-recommended`.
     Use `[LoggerMessage]` partial methods (CA1848), and keep CA1861/CA1707 suppressions where
     they are (migrations and test names only).
 
@@ -76,8 +80,12 @@ dotnet test tests/Multitenant.IntegrationTests
 # Everything
 dotnet test multitenant-aspnet-api.slnx
 
-# Run the API against local PostgreSQL
-dotnet run --project src/Multitenant.Api
+# Start the local database only (loopback-bound, data kept in the postgres-data volume).
+# Compose needs a .env first: cp .env.example .env and set JWT_SIGNING_KEY.
+docker compose up -d postgres
+
+# Run the API against that database; it creates the DB, migrates and seeds on start
+dotnet run --project src/Multitenant.Api --launch-profile http
 
 # Run the whole stack
 docker compose up --build
@@ -120,7 +128,7 @@ cross-platform.
 | Rate limiting | `src/Multitenant.Api/RateLimiting/RateLimitingSetup.cs` |
 | Test harness | `tests/Multitenant.IntegrationTests/Infrastructure/IntegrationHarness.cs` |
 | Test scenarios/helpers | `tests/Multitenant.IntegrationTests/Infrastructure/Scenarios.cs` |
-| Docs | `README.md`, `docs/architecture.md`, `docs/adr/` |
+| Docs | `README.md` (humans), `HANDOVER.md` (agents), `docs/architecture.md`, `docs/adr/` |
 
 ---
 
@@ -142,7 +150,7 @@ cross-platform.
   used to drive Identity's authenticator provider.
 - If Testcontainers cannot find Docker, unit tests still pass; integration tests fail at
   container startup. Start Docker Desktop (or the engine) first.
-- The integration suite currently takes ~10 seconds after the image is cached.
+- The integration suite takes ~20 seconds once the PostgreSQL image is cached.
 
 ---
 
@@ -150,15 +158,23 @@ cross-platform.
 
 - **2FA setup rotates the security stamp** (`ResetAuthenticatorKeyAsync`). A client must log in
   again between `/auth/2fa/setup` and `/auth/2fa/enable`. The test documents this.
-- **Registration does not confirm email.** New users start with `EmailConfirmed=false`. They
-  can log in unless `Identity:RequireConfirmedEmail=true`.
-- **Demo users are seeded pre-confirmed** so they work with either flag value.
+- **Registration does not confirm email, but it does send the link.** `POST /auth/register`
+  creates the user with `EmailConfirmed=false` and sends the confirmation email, like
+  `/users` and onboarding. They can log in unless `Identity:RequireConfirmedEmail=true`.
+- **Email confirmation is checked after the password.** `Identity`'s own
+  `SignIn.RequireConfirmedEmail`/`RequireConfirmedAccount` gates are deliberately off: they run
+  before the password, which let an anonymous caller tell an unconfirmed address (`403
+  email_not_confirmed`) from an unknown one (`401`). `AuthService` enforces the flag itself, and
+  `RefreshAsync` rejects unconfirmed users too, so old sessions die when the flag is switched on.
+- **Demo seeding requires an explicit password.** `Database:SeedDemoData=true` with an empty
+  `Demo:Password` throws at startup instead of silently skipping, and `compose.yaml` ships with
+  seeding off (`SEED_DEMO_DATA`). Seeded accounts are pre-confirmed so they work with either
+  flag value, and every one of them uses `Demo:Password`.
 - **Onboarding sends the confirmation email after the transaction commits.** A failure is
   logged and does not roll back the tenant.
 - **Role changes keep refresh tokens valid**, so the next refresh issues a token with the new
   role. Access tokens are invalidated immediately by the security-stamp bump.
-- **Login is by tenant slug + email**, not email alone. `UserName` is `{slug}:{email}`.
-- **`Demo:Password` is used for every seeded account** in both demo tenants.
+- **Login is by tenant slug + email**, not email alone.
 - **Status codes**: validation 400 (`validation_failed`), auth 401, role 403, missing/foreign
   resource 404, duplicates 409, rate limit 429 (`rate_limited`), disabled feature 404
   (`feature_disabled`).
@@ -176,7 +192,16 @@ cross-platform.
   complex action parameter lacks an `IValidator<T>`; add a validator when adding an endpoint.
 - **Provisioning and demo seeding are transactional.** `UserProvisioningService` joins a
   caller's transaction when one exists (onboarding) and owns one otherwise; the initializer
-  wraps the whole demo tenant seed so a partial failure rolls back.
+  wraps the whole demo tenant seed so a partial failure rolls back. A concurrent duplicate
+  registration that beats the pre-check is mapped from the unique-index violation to the same
+  `409 email_taken` instead of a `500`.
+- **The database refuses half-set assignees.** `CK_WorkItems_AssigneeTenant` requires both
+  `AssigneeTenantId` and `AssigneeUserId` to be set together; the composite FK is MATCH SIMPLE,
+  so a NULL in either column would otherwise skip the tenant check and accept another tenant's
+  user id (`TenantIntegrityTests` covers this).
+- **`UserName` is an internal key, not a login name** (`{slug}:{email}`), so Identity's
+  whitelist of allowed username characters is disabled in `DependencyInjection`; otherwise valid
+  addresses containing apostrophes or non-ASCII characters would fail user creation.
 - **OpenAPI** is versioned (`/openapi/v1.json`); Scalar is at `/scalar` and shows a bearer
   authentication panel from the declared scheme.
 
@@ -214,8 +239,9 @@ cross-platform.
   running more than one replica, or confirmation tokens minted by one instance will not
   validate on another.
 - Run migrations as an explicit release step.
-- The image is published to `ghcr.io/<owner>/<repo>` on `main`/tags. Tag `v1.0.0` produces
-  container tags `1.0.0` and `1.0`.
+- The image is published to `ghcr.io/<owner>/<repo>` on `main`/tags. The current release is
+  `v1.0.1`, which produces container tags `1.0.1` and `1.0` (`latest` follows the default
+  branch).
 - Multi-replica caveat: rate limiter state is per process, and Data Protection keys are local
   unless a shared ring is configured.
 
@@ -223,7 +249,8 @@ cross-platform.
 
 ## 9. Known gaps / sensible next tasks
 
-1. Replace slug-based self-registration with signed invites (the only "open door").
+1. Add public sign-up as a real invite flow (signed invites or an email-domain allow-list);
+   `POST /auth/register` is admin-only today and should stay that way otherwise.
 2. Add a background job to purge expired/revoked refresh tokens.
 3. Distributed rate limiting (Redis) for multi-replica deployments.
 4. Per-resource permissions (project membership) instead of tenant-wide roles.
@@ -231,28 +258,27 @@ cross-platform.
 6. Templated emails and a real provider (SES / Azure Communication Services).
 7. Optional caching of the per-request user/security-stamp lookup.
 8. Per-tenant feature flags (PDF stretch item; only deployment-wide flags exist today).
-9. Tenant management endpoints (list/get/update/deactivate/delete); onboarding + current only today.
+9. Tenant management endpoints (list/update/deactivate/delete); onboarding, `current` and
+   get-by-id exist today.
 
 ---
 
 ## 10. Git and release
 
-- Default branch: `main` (the workflow also accepts `master`).
+- Default branch: `master` (the workflow also accepts `main`).
 - Commit style used here: short imperative subject, body explaining the why.
-- To cut the release after merging:
+- To cut a release:
 
   ```bash
-  git tag -a v1.0.0 -m "Multitenant SaaS API v1.0.0"
-  git push origin v1.0.0
+  git tag -a v1.0.1 -m "Multitenant SaaS API v1.0.1"
+  git push origin v1.0.1
   ```
 
-  CI publishes `ghcr.io/<owner>/<repo>:1.0.0` and `:1.0`.
+  CI publishes `ghcr.io/<owner>/<repo>:1.0.1` and `:1.0`.
 
 - Do not commit `.env`, `appsettings*.json` (other than `appsettings.json`), tokens or
   passwords. `appsettings.Development.json` is intentionally git-ignored; create it locally
-  (see README `Configuration`) or pass the values as environment variables. The previously
-  committed development secrets were removed from git tracking — rotate any value that was
-  ever pushed.
+  (see README `Local database`) or pass the values as environment variables.
 
 ---
 
@@ -261,10 +287,11 @@ cross-platform.
 1. `git status` — expect a clean tree.
 2. `dotnet build multitenant-aspnet-api.slnx` — expect 0 warnings.
 3. `dotnet test tests/Multitenant.UnitTests` — expect 32 passing.
-4. Start Docker, then `dotnet test tests/Multitenant.IntegrationTests` — expect 51 passing.
-5. `cp .env.example .env` and adjust `JWT_SIGNING_KEY`/passwords, then
+4. Start Docker, then `dotnet test tests/Multitenant.IntegrationTests` — expect 54 passing.
+5. `cp .env.example .env` and adjust `JWT_SIGNING_KEY`/`POSTGRES_PASSWORD`. Demo accounts are
+   opt-in: set `SEED_DEMO_DATA=true` and a `DEMO_PASSWORD` of your choice, then
    `docker compose up --build`, open <http://localhost:8080/scalar>, log in as
-   `owner@acme.test` / `Demo123!Passw0rd`. To run with `dotnet run` instead, first create the
+   `owner@acme.test` with that password. To run with `dotnet run` instead, first create the
    git-ignored `src/Multitenant.Api/appsettings.Development.json` (see README `Configuration`)
    or export the equivalent `ConnectionStrings__Postgres`, `Jwt__SigningKey`,
    `Demo__Password`, `Database__AutoMigrate` and `Database__SeedDemoData` variables.

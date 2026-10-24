@@ -86,7 +86,7 @@ public sealed class UserService(
             .Take(pageSize)
             .ToListAsync(cancellationToken);
 
-        var roles = await RolesForAsync(items.Select(x => x.Id).ToList(), cancellationToken);
+        var roles = await RolesForAsync([.. items.Select(x => x.Id)], cancellationToken);
 
         var responses = items
             .Select(x => userProvisioning.ToResponse(x, roles.GetValueOrDefault(x.Id, TenantRoles.Member)))
@@ -171,14 +171,16 @@ public sealed class UserService(
             return userProvisioning.ToResponse(target, requestedRole);
         }
 
+        // Both role writes must succeed together; otherwise the user would be left
+        // with no role at all. The tenant row lock serializes concurrent Owner
+        // changes so the last-Owner guard cannot be defeated by a race.
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await LockTenantAsync(cancellationToken);
+
         if (currentRole == TenantRoles.Owner && await CountOwnersAsync(cancellationToken) <= 1)
         {
             throw new ConflictException("The last Owner cannot be demoted.", "last_owner");
         }
-
-        // Both role writes must succeed together; otherwise the user would be left
-        // with no role at all.
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
         if (targetRoles.Count > 0)
         {
@@ -221,12 +223,18 @@ public sealed class UserService(
             throw new ForbiddenException("Only an Owner can delete an Owner.", "role_not_allowed");
         }
 
+        // Same guard and the same serialization as UpdateRoleAsync: deleting and
+        // demoting are two ways of removing the last Owner.
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await LockTenantAsync(cancellationToken);
+
         if (targetRole == TenantRoles.Owner && await CountOwnersAsync(cancellationToken) <= 1)
         {
             throw new ConflictException("The last Owner cannot be deleted.", "last_owner");
         }
 
         EnsureSucceeded(await userManager.DeleteAsync(target), "user_delete_failed");
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private async Task<Dictionary<Guid, string>> RolesForAsync(
@@ -254,6 +262,20 @@ public sealed class UserService(
     {
         var roles = await userManager.GetRolesAsync(user);
         return roles.FirstOrDefault() ?? TenantRoles.Member;
+    }
+
+    /// <summary>
+    /// Takes a row lock on the current tenant, held until the surrounding
+    /// transaction ends. Two concurrent Owner demotions would otherwise both read
+    /// "two Owners" and both commit, leaving the tenant without one.
+    /// </summary>
+    private async Task LockTenantAsync(CancellationToken cancellationToken)
+    {
+        var tenantId = tenantContext.TenantId ?? throw new UnauthorizedException();
+
+        await dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT 1 FROM \"Tenants\" WHERE \"Id\" = {tenantId} FOR UPDATE",
+            cancellationToken);
     }
 
     private Task<int> CountOwnersAsync(CancellationToken cancellationToken)

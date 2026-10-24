@@ -2,6 +2,7 @@ using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Multitenant.Api.Authorization;
 using Multitenant.Api.RateLimiting;
 using Multitenant.Application.Abstractions.Identity;
 using Multitenant.Application.Contracts.Auth;
@@ -39,14 +40,15 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     }
 
     /// <summary>
-    /// Self-service registration into an existing tenant. New users always start as
-    /// <c>Member</c>; an Owner or Admin promotes them through the users endpoints.
+    /// Adds a <c>Member</c> to the caller's own tenant. Restricted to that tenant's
+    /// Owners and Admins: anonymous joining by slug alone is not allowed, because it
+    /// would expose the tenant's data to anyone who knows the slug.
     /// </summary>
     [HttpPost("register")]
-    [AllowAnonymous]
+    [Authorize(Policy = Policies.ManageTenant)]
     [EnableRateLimiting(RateLimitingSetup.AuthPolicy)]
     [ProducesResponseType<UserResponse>(StatusCodes.Status201Created)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<UserResponse>> Register(
         RegisterRequest request,

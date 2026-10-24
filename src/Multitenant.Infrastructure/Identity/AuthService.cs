@@ -66,13 +66,6 @@ public sealed class AuthService(
             throw new UnauthorizedException();
         }
 
-        if (_identity.RequireConfirmedEmail && !user.EmailConfirmed)
-        {
-            throw new ForbiddenException(
-                "Email confirmation is required before signing in.",
-                "email_not_confirmed");
-        }
-
         var password = await signInManager.CheckPasswordSignInAsync(
             user,
             request.Password,
@@ -81,6 +74,15 @@ public sealed class AuthService(
         if (!password.Succeeded)
         {
             throw new UnauthorizedException();
+        }
+
+        // Checked only after the password succeeds, so an anonymous caller cannot
+        // use the email_not_confirmed response to enumerate registered addresses.
+        if (_identity.RequireConfirmedEmail && !user.EmailConfirmed)
+        {
+            throw new ForbiddenException(
+                "Email confirmation is required before signing in.",
+                "email_not_confirmed");
         }
 
         if (_identity.EnableTwoFactor && user.TwoFactorEnabled)
@@ -100,22 +102,35 @@ public sealed class AuthService(
         RegisterRequest request,
         CancellationToken cancellationToken)
     {
-        var tenant = await FindTenantBySlugAsync(request.TenantSlug, cancellationToken);
-        if (tenant is null || !tenant.IsActive)
+        // The endpoint is restricted to the tenant's Owners and Admins (ManageTenant
+        // policy) and only ever adds a Member to the caller's own tenant. Anonymous
+        // self-service joining is deliberately not supported: knowing a slug must
+        // not be enough to read a tenant's data.
+        var tenantId = tenantContext.TenantId ?? throw new UnauthorizedException();
+        var tenantSlug = tenantContext.Slug ?? throw new UnauthorizedException();
+
+        // The slug is validated rather than trusted so an admin of one tenant
+        // cannot create users inside another one.
+        if (!string.Equals(
+                TenantSlug.Normalize(request.TenantSlug),
+                tenantSlug,
+                StringComparison.OrdinalIgnoreCase))
         {
-            throw new NotFoundException("Tenant not found.", "tenant_not_found");
+            throw new ForbiddenException(
+                "You can only register users in your own tenant.",
+                "tenant_mismatch");
         }
 
-        tenantContext.SetTenant(tenant.Id, tenant.Slug);
-
         var user = await userProvisioning.CreateAsync(
-            tenant.Id,
-            tenant.Slug,
+            tenantId,
+            tenantSlug,
             request.Email,
             request.DisplayName,
             request.Password,
             TenantRoles.Member,
             cancellationToken);
+
+        await accountEmailService.SendConfirmationEmailAsync(user, cancellationToken);
 
         return userProvisioning.ToResponse(user, TenantRoles.Member);
     }
@@ -129,12 +144,7 @@ public sealed class AuthService(
             .AsNoTracking()
             .FirstOrDefaultAsync(
                 x => x.TokenHash == RefreshTokenManager.Hash(refreshToken),
-                cancellationToken);
-
-        if (stored is null)
-        {
-            throw InvalidRefreshToken();
-        }
+                cancellationToken) ?? throw InvalidRefreshToken();
 
         // Presenting an already-rotated token means the token was stolen or replayed.
         // Revoke the whole family so neither party can continue.
@@ -163,6 +173,15 @@ public sealed class AuthService(
         if (user is null || !user.IsActive)
         {
             throw InvalidRefreshToken();
+        }
+
+        // Sessions created while confirmation was optional must not keep minting
+        // access tokens after RequireConfirmedEmail is switched on.
+        if (_identity.RequireConfirmedEmail && !user.EmailConfirmed)
+        {
+            throw new ForbiddenException(
+                "Email confirmation is required before signing in.",
+                "email_not_confirmed");
         }
 
         var tenant = await FindTenantByIdAsync(user.TenantId, cancellationToken);
@@ -331,7 +350,7 @@ public sealed class AuthService(
         await userManager.UpdateAsync(user);
 
         var recoveryCodes = await userManager.GenerateNewTwoFactorRecoveryCodesAsync(user, 10) ?? [];
-        return new TwoFactorEnabledResponse(recoveryCodes.ToList());
+        return new TwoFactorEnabledResponse([.. recoveryCodes]);
     }
 
     public async Task DisableTwoFactorAsync(string code, CancellationToken cancellationToken)

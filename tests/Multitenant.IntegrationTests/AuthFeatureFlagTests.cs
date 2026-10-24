@@ -32,6 +32,27 @@ public sealed class AuthFeatureFlagTests : IntegrationTestBase
     }
 
     [Fact]
+    public async Task RefreshIsRejectedWhenConfirmationBecomesRequired()
+    {
+        using var client = CreateClient();
+        var tokens = await Scenarios.OnboardAndLoginAsync(client, "flag-refresh", "refresh@acme.test");
+
+        // Sessions minted while confirmation was optional must not survive the
+        // flag being switched on.
+        await using var strict = Harness.CreateFactory(configuration =>
+            configuration["Identity:RequireConfirmedEmail"] = "true");
+        using var strictClient = strict.CreateClient();
+
+        var refreshed = await strictClient.PostApi(
+            "/api/v1/auth/refresh",
+            new RefreshTokenRequest(tokens.RefreshToken));
+
+        Assert.Equal(HttpStatusCode.Forbidden, refreshed.StatusCode);
+        var problem = await refreshed.ReadAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
+        Assert.Equal("email_not_confirmed", problem.Extensions["code"]?.ToString());
+    }
+
+    [Fact]
     public async Task TwoFactorEndpointsAreHiddenByDefault()
     {
         using var client = CreateClient();

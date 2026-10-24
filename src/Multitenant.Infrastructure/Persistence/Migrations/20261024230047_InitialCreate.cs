@@ -89,6 +89,7 @@ namespace Multitenant.Infrastructure.Persistence.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_AspNetUsers", x => x.Id);
+                    table.UniqueConstraint("AK_AspNetUsers_TenantId_Id", x => new { x.TenantId, x.Id });
                     table.ForeignKey(
                         name: "FK_AspNetUsers_Tenants_TenantId",
                         column: x => x.TenantId,
@@ -245,6 +246,7 @@ namespace Multitenant.Infrastructure.Persistence.Migrations
                     Status = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
                     Priority = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
                     AssigneeUserId = table.Column<Guid>(type: "uuid", nullable: true),
+                    AssigneeTenantId = table.Column<Guid>(type: "uuid", nullable: true),
                     DueDate = table.Column<DateOnly>(type: "date", nullable: true),
                     CreatedAtUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     UpdatedAtUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
@@ -252,11 +254,12 @@ namespace Multitenant.Infrastructure.Persistence.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_WorkItems", x => x.Id);
+                    table.CheckConstraint("CK_WorkItems_AssigneeTenant", "(\"AssigneeTenantId\" IS NULL AND \"AssigneeUserId\" IS NULL) OR (\"AssigneeTenantId\" IS NOT NULL AND \"AssigneeUserId\" IS NOT NULL AND \"AssigneeTenantId\" = \"TenantId\")");
                     table.ForeignKey(
-                        name: "FK_WorkItems_AspNetUsers_AssigneeUserId",
-                        column: x => x.AssigneeUserId,
+                        name: "FK_WorkItems_AspNetUsers_AssigneeTenantId_AssigneeUserId",
+                        columns: x => new { x.AssigneeTenantId, x.AssigneeUserId },
                         principalTable: "AspNetUsers",
-                        principalColumn: "Id",
+                        principalColumns: new[] { "TenantId", "Id" },
                         onDelete: ReferentialAction.SetNull);
                     table.ForeignKey(
                         name: "FK_WorkItems_Projects_TenantId_ProjectId",
@@ -352,9 +355,9 @@ namespace Multitenant.Infrastructure.Persistence.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_WorkItems_AssigneeUserId",
+                name: "IX_WorkItems_AssigneeTenantId_AssigneeUserId",
                 table: "WorkItems",
-                column: "AssigneeUserId");
+                columns: new[] { "AssigneeTenantId", "AssigneeUserId" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_WorkItems_TenantId_AssigneeUserId",

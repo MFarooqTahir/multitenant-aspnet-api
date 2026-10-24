@@ -40,10 +40,13 @@ public sealed partial class DatabaseInitializer(
             return;
         }
 
+        // Fail loudly instead of quietly skipping: a deployment that asks for demo
+        // data but forgets the password would otherwise be one configuration typo
+        // away from demo Owners with credentials nobody chose.
         if (string.IsNullOrWhiteSpace(_demo.Password))
         {
-            LogMissingDemoPassword(logger);
-            return;
+            throw new InvalidOperationException(
+                "Database:SeedDemoData is enabled but Demo:Password is empty. Set Demo:Password or disable demo seeding.");
         }
 
         await SeedDemoTenantAsync(
@@ -228,12 +231,6 @@ public sealed partial class DatabaseInitializer(
         Level = LogLevel.Information,
         Message = "Applying database migrations.")]
     private static partial void LogApplyingMigrations(ILogger logger);
-
-    [LoggerMessage(
-        EventId = 3002,
-        Level = LogLevel.Warning,
-        Message = "Database:SeedDemoData is enabled but Demo:Password is empty; skipping demo tenants.")]
-    private static partial void LogMissingDemoPassword(ILogger logger);
 
     [LoggerMessage(
         EventId = 3003,
