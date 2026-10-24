@@ -16,8 +16,8 @@ A practical guide for the next engineer or AI agent picking up this repository.
 | Docker | `Dockerfile` and `compose.yaml` are current; image builds |
 | CI | `.github/workflows/ci.yml` builds, tests and publishes to GHCR on `main`/`master` and tags |
 
-Nothing in the working tree is intentionally half-finished. The "known limitations" section in
-`README.md` is the authoritative backlog.
+Nothing in the working tree is intentionally half-finished. The "Known limitations and roadmap"
+section in `README.md` is the authoritative backlog.
 
 ---
 
@@ -278,7 +278,7 @@ cross-platform.
 
 - Do not commit `.env`, `appsettings*.json` (other than `appsettings.json`), tokens or
   passwords. `appsettings.Development.json` is intentionally git-ignored; create it locally
-  (see README `Local database`) or pass the values as environment variables.
+  (see README `Quick start`) or pass the values as environment variables.
 
 ---
 
