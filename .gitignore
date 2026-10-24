@@ -1,7 +1,58 @@
+# Build output
 bin/
 obj/
-/packages/
-riderModule.iml
-/_ReSharper.Caches/
+artifacts/
+publish/
+*.dll
+*.exe
+*.pdb
+*.cache
 
-appsettings.Development.json
+# Test artifacts
+TestResults/
+coverage/
+coverage.*
+*.coverage
+*.coveragexml
+*.trx
+
+# IDE and editor files
+.vs/
+.vscode/
+.idea/
+_ReSharper*/
+*.DotSettings.user
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.swp
+*~
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+appsettings.*.local.json
+secrets.json
+*.pfx
+*.snk
+*.key
+
+# Local databases and logs
+*.db
+*.db-shm
+*.db-wal
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Rider
+riderModule.iml
+
+# Docker
+docker-compose.override.yml

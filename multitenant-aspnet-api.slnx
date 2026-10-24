@@ -1,6 +1,18 @@
 <Solution>
   <Folder Name="/Solution Items/">
     <File Path="compose.yaml" />
+    <File Path=".env.example" />
+    <File Path="README.md" />
+    <File Path="Directory.Build.props" />
   </Folder>
-  <Project Path="multitenant-aspnet-api/multitenant-aspnet-api.csproj" />
+  <Folder Name="/src/">
+    <Project Path="src/Multitenant.Api/Multitenant.Api.csproj" />
+    <Project Path="src/Multitenant.Application/Multitenant.Application.csproj" />
+    <Project Path="src/Multitenant.Domain/Multitenant.Domain.csproj" />
+    <Project Path="src/Multitenant.Infrastructure/Multitenant.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Multitenant.IntegrationTests/Multitenant.IntegrationTests.csproj" />
+    <Project Path="tests/Multitenant.UnitTests/Multitenant.UnitTests.csproj" />
+  </Folder>
 </Solution>
