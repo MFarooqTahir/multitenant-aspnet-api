@@ -113,11 +113,22 @@ if (cors.AllowedOrigins.Length > 0)
 {
     builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
         .WithOrigins(cors.AllowedOrigins)
-        .AllowAnyHeader()
-        .AllowAnyMethod()));
+        .WithHeaders("Content-Type", "Authorization", "X-Correlation-Id", "X-Api-Version")
+        .WithMethods("GET", "POST", "PUT", "PATCH", "DELETE")
+        .DisallowCredentials()));
 }
 
 var app = builder.Build();
+
+// Fail fast if a non-development deployment leaves the wildcard host filter in place.
+var allowedHosts = app.Configuration["AllowedHosts"];
+if (!app.Environment.IsDevelopment()
+    && (string.IsNullOrWhiteSpace(allowedHosts) || allowedHosts.Trim() == "*"))
+{
+    throw new InvalidOperationException(
+        "AllowedHosts must list explicit host names outside Development. "
+        + "Set it via configuration (AllowedHosts) or the AllowedHosts environment variable.");
+}
 
 if (forwardedHeaders.Enabled)
 {
@@ -128,6 +139,8 @@ app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseExceptionHandler();
 app.UseProblemDetailsStatusCodePages();
 app.UseSerilogRequestLogging();
+
+app.UseHttpsRedirection();
 
 if (!app.Environment.IsDevelopment())
 {
@@ -144,6 +157,10 @@ app.UseRateLimiter();
 app.UseAuthorization();
 
 app.MapControllers();
+
+// Ensure the ValidationFilter cannot silently fail open: every complex action
+// parameter must have a registered FluentValidation validator.
+ValidationFilterAssertion.AssertAllActionParametersHaveValidators(app.Services);
 
 app.MapHealthChecks("/health").DisableRateLimiting();
 app.MapHealthChecks("/health/live", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions

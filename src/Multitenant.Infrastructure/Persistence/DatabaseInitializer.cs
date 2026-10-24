@@ -105,57 +105,72 @@ public sealed partial class DatabaseInitializer(
 
         LogSeedingTenant(logger, slug);
 
-        var tenant = Tenant.Create(slug, name, timeProvider.GetUtcNow());
-        dbContext.Tenants.Add(tenant);
-        tenantContext.SetTenant(tenant.Id, tenant.Slug);
+        // Wrap the entire tenant seed in a single transaction so that a partial failure
+        // (e.g. a password policy rejection on the second user) rolls back the tenant
+        // and all its data. Without this, an incomplete seed would be skipped by the
+        // existence check on subsequent startups and permanently left broken.
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-        var owner = await CreateUserAsync(tenant, ownerEmail, ownerDisplayName, TenantRoles.Owner, cancellationToken);
-        await CreateUserAsync(tenant, memberEmail, memberDisplayName, TenantRoles.Member, cancellationToken);
-
-        var project = new Project
+        try
         {
-            TenantId = tenant.Id,
-            Name = projectName,
-            Description = $"The {projectName} project seeded for the {name} demo tenant.",
-            Status = ProjectStatus.Active,
-        };
+            var tenant = Tenant.Create(slug, name, timeProvider.GetUtcNow());
+            dbContext.Tenants.Add(tenant);
+            tenantContext.SetTenant(tenant.Id, tenant.Slug);
 
-        dbContext.Projects.Add(project);
-        dbContext.WorkItems.AddRange(
-            new WorkItem
-            {
-                TenantId = tenant.Id,
-                ProjectId = project.Id,
-                Title = "Review the onboarding flow",
-                Description = "Walk through onboarding as an Owner and confirm the starter data.",
-                Status = WorkItemStatus.Done,
-                Priority = WorkItemPriority.Medium,
-                AssigneeUserId = owner.Id,
-                AssigneeTenantId = tenant.Id,
-            },
-            new WorkItem
-            {
-                TenantId = tenant.Id,
-                ProjectId = project.Id,
-                Title = "Invite the team",
-                Description = "Create Member and Admin users to explore the role policies.",
-                Status = WorkItemStatus.InProgress,
-                Priority = WorkItemPriority.High,
-                AssigneeUserId = owner.Id,
-                AssigneeTenantId = tenant.Id,
-            },
-            new WorkItem
-            {
-                TenantId = tenant.Id,
-                ProjectId = project.Id,
-                Title = "Ship the first release",
-                Description = "Tag v1.0.0 once the API is deployed.",
-                Status = WorkItemStatus.Todo,
-                Priority = WorkItemPriority.Low,
-                DueDate = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime).AddDays(14),
-            });
+            var owner = await CreateUserAsync(tenant, ownerEmail, ownerDisplayName, TenantRoles.Owner, cancellationToken);
+            await CreateUserAsync(tenant, memberEmail, memberDisplayName, TenantRoles.Member, cancellationToken);
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+            var project = new Project
+            {
+                TenantId = tenant.Id,
+                Name = projectName,
+                Description = $"The {projectName} project seeded for the {name} demo tenant.",
+                Status = ProjectStatus.Active,
+            };
+
+            dbContext.Projects.Add(project);
+            dbContext.WorkItems.AddRange(
+                new WorkItem
+                {
+                    TenantId = tenant.Id,
+                    ProjectId = project.Id,
+                    Title = "Review the onboarding flow",
+                    Description = "Walk through onboarding as an Owner and confirm the starter data.",
+                    Status = WorkItemStatus.Done,
+                    Priority = WorkItemPriority.Medium,
+                    AssigneeUserId = owner.Id,
+                    AssigneeTenantId = tenant.Id,
+                },
+                new WorkItem
+                {
+                    TenantId = tenant.Id,
+                    ProjectId = project.Id,
+                    Title = "Invite the team",
+                    Description = "Create Member and Admin users to explore the role policies.",
+                    Status = WorkItemStatus.InProgress,
+                    Priority = WorkItemPriority.High,
+                    AssigneeUserId = owner.Id,
+                    AssigneeTenantId = tenant.Id,
+                },
+                new WorkItem
+                {
+                    TenantId = tenant.Id,
+                    ProjectId = project.Id,
+                    Title = "Ship the first release",
+                    Description = "Tag v1.0.0 once the API is deployed.",
+                    Status = WorkItemStatus.Todo,
+                    Priority = WorkItemPriority.Low,
+                    DueDate = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime).AddDays(14),
+                });
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
     }
 
     private async Task<AppUser> CreateUserAsync(

@@ -86,17 +86,20 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
         return NoContent();
     }
 
-    /// <summary>Completes email confirmation using the token from the confirmation email.</summary>
-    [HttpGet("confirm-email")]
+    /// <summary>
+    /// Completes email confirmation using the token from the confirmation email.
+    /// The token is sent in the request body (not the query string) so it is not
+    /// captured by proxy logs, browser history or Referer headers.
+    /// </summary>
+    [HttpPost("confirm-email")]
     [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ConfirmEmail(
-        [FromQuery] Guid userId,
-        [FromQuery] string token,
+        ConfirmEmailRequest request,
         CancellationToken cancellationToken)
     {
-        await authService.ConfirmEmailAsync(userId, token, cancellationToken);
+        await authService.ConfirmEmailAsync(request.UserId, request.Token, cancellationToken);
         return NoContent();
     }
 

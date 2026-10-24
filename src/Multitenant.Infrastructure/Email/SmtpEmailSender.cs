@@ -39,9 +39,15 @@ public sealed partial class SmtpEmailSender(
         }.ToMessageBody();
 
         using var client = new SmtpClient();
+
+        if (!smtp.UseStartTls)
+        {
+            LogPlaintextWarning(logger, smtp.Host);
+        }
+
         var secureSocketOptions = smtp.UseStartTls
             ? SecureSocketOptions.StartTls
-            : SecureSocketOptions.Auto;
+            : SecureSocketOptions.None;
 
         await client.ConnectAsync(smtp.Host, smtp.Port, secureSocketOptions, cancellationToken);
 
@@ -61,4 +67,10 @@ public sealed partial class SmtpEmailSender(
         Level = LogLevel.Information,
         Message = "Sent email to {ToAddress} with subject {Subject} via {Host}.")]
     private static partial void LogSent(ILogger logger, string toAddress, string subject, string host);
+
+    [LoggerMessage(
+        EventId = 1003,
+        Level = LogLevel.Warning,
+        Message = "SMTP:UseStartTls is false; the connection to {Host} is unencrypted.")]
+    private static partial void LogPlaintextWarning(ILogger logger, string host);
 }

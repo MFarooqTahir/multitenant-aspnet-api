@@ -25,8 +25,9 @@ public sealed partial class AuthConfirmationTests : IntegrationTestBase
         var message = Assert.Single(sender.Messages);
         var (userId, token) = ExtractConfirmationLink(message.TextBody);
 
-        var confirm = await client.GetApi(
-            $"/api/v1/auth/confirm-email?userId={userId}&token={token}");
+        var confirm = await client.PostApi(
+            "/api/v1/auth/confirm-email",
+            new ConfirmEmailRequest(userId, token));
 
         Assert.Equal(HttpStatusCode.NoContent, confirm.StatusCode);
     }
@@ -54,8 +55,9 @@ public sealed partial class AuthConfirmationTests : IntegrationTestBase
         var message = Assert.Single(sender.Messages);
         var (userId, token) = ExtractConfirmationLink(message.TextBody);
 
-        var confirm = await client.GetApi(
-            $"/api/v1/auth/confirm-email?userId={userId}&token={token}");
+        var confirm = await client.PostApi(
+            "/api/v1/auth/confirm-email",
+            new ConfirmEmailRequest(userId, token));
         Assert.Equal(HttpStatusCode.NoContent, confirm.StatusCode);
 
         var login = await Scenarios.LoginAsync(client, "confirm-on", "confirm-on@acme.test", Scenarios.Password);
@@ -96,7 +98,7 @@ public sealed partial class AuthConfirmationTests : IntegrationTestBase
 
         return (
             Guid.Parse(match.Groups["userId"].Value),
-            match.Groups["token"].Value);
+            Uri.UnescapeDataString(match.Groups["token"].Value));
     }
 
     [GeneratedRegex(@"userId=(?<userId>[0-9a-fA-F-]+)&token=(?<token>[^&\s]+)")]

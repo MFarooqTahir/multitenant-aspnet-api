@@ -59,21 +59,41 @@ public sealed partial class UserProvisioningService(
             CreatedAtUtc = timeProvider.GetUtcNow(),
         };
 
-        EnsureSucceeded(await userManager.CreateAsync(user, password), "user_creation_failed");
+        // Wrap creation and role assignment in a transaction so that if role assignment
+        // fails, the user creation is rolled back rather than requiring a separate
+        // delete that could itself fail and leave an orphaned, roleless account.
+        // When a caller (e.g. tenant onboarding) already owns a transaction, join it
+        // instead of starting a nested one.
+        await using var transaction = dbContext.Database.CurrentTransaction is null
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+            : null;
 
-        var roleAssigned = await userManager.AddToRoleAsync(user, role);
-        if (!roleAssigned.Succeeded)
+        try
         {
-            // Never leave a half-provisioned account (user without a role) behind.
-            var cleanup = await userManager.DeleteAsync(user);
-            if (!cleanup.Succeeded)
+            EnsureSucceeded(await userManager.CreateAsync(user, password), "user_creation_failed");
+
+            var roleAssigned = await userManager.AddToRoleAsync(user, role);
+            if (!roleAssigned.Succeeded)
             {
-                LogCleanupFailed(logger, user.Id);
+                throw new ConflictException(
+                    string.Join(" ", roleAssigned.Errors.Select(x => x.Description)),
+                    "role_assignment_failed");
             }
 
-            throw new ConflictException(
-                string.Join(" ", roleAssigned.Errors.Select(x => x.Description)),
-                "role_assignment_failed");
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+        }
+        catch
+        {
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                LogProvisioningRolledBack(logger, user.Id);
+            }
+
+            throw;
         }
 
         return user;
@@ -100,7 +120,7 @@ public sealed partial class UserProvisioningService(
 
     [LoggerMessage(
         EventId = 2002,
-        Level = LogLevel.Error,
-        Message = "Could not delete partially provisioned user {UserId}; manual cleanup is required.")]
-    private static partial void LogCleanupFailed(ILogger logger, Guid userId);
+        Level = LogLevel.Warning,
+        Message = "Rolled back provisioning for user {UserId} because role assignment or persistence failed.")]
+    private static partial void LogProvisioningRolledBack(ILogger logger, Guid userId);
 }

@@ -9,6 +9,11 @@ namespace Multitenant.Api.Filters;
 /// Runs the FluentValidation validator registered for each action argument and
 /// short-circuits with an RFC 7807 validation problem.
 /// </summary>
+/// <remarks>
+/// A missing validator is a fail-open: the action runs with unvalidated input.
+/// <see cref="ValidationFilterAssertion"/> enforces at startup that every action
+/// parameter type has a corresponding validator registered.
+/// </remarks>
 public sealed class ValidationFilter(IServiceProvider services) : IAsyncActionFilter
 {
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)

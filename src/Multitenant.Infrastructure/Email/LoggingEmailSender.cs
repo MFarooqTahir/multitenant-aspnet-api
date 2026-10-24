@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Multitenant.Application.Abstractions.Messaging;
 
@@ -11,9 +12,15 @@ public sealed partial class LoggingEmailSender(ILogger<LoggingEmailSender> logge
 {
     public Task SendAsync(EmailMessage message, CancellationToken cancellationToken)
     {
-        LogEmail(logger, message.ToAddress, message.Subject, message.TextBody);
+        var safeBody = TokenPattern().Replace(message.TextBody ?? string.Empty, "$1token=[REDACTED]");
+        LogEmail(logger, message.ToAddress, message.Subject, safeBody);
         return Task.CompletedTask;
     }
+
+    // Redacts email confirmation tokens that appear as query-string or body values,
+    // so they are not persisted to log aggregation systems in plaintext.
+    [GeneratedRegex(@"(\?|&)token=[^&\s""]+|token=[^&\s""]+")]
+    private static partial Regex TokenPattern();
 
     [LoggerMessage(
         EventId = 1001,

@@ -330,7 +330,7 @@ Base path: `/api/v1`. All timestamps are UTC. Errors are `application/problem+js
 | POST | `/auth/refresh` | anonymous, IP-limited | Rotate refresh token, issue new pair |
 | POST | `/auth/logout` | bearer | Revoke one refresh token |
 | POST | `/auth/logout-all` | bearer | Revoke all sessions and access tokens |
-| GET | `/auth/confirm-email?userId=&token=` | anonymous | Complete email confirmation |
+| POST | `/auth/confirm-email` | anonymous | Complete email confirmation (`{userId, token}` body) |
 | POST | `/auth/resend-confirmation` | anonymous, IP-limited | Re-send confirmation (always 202) |
 | POST | `/auth/2fa/setup` | bearer | Create authenticator key + URI |
 | POST | `/auth/2fa/enable` | bearer | Verify first code, return recovery codes |

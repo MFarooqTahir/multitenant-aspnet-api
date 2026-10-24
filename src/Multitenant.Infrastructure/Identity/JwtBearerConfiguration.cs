@@ -88,7 +88,12 @@ public static class JwtBearerConfiguration
         }
 
         var tokenStamp = principal.FindFirst(AuthClaims.SecurityStamp)?.Value;
-        if (!string.Equals(tokenStamp, user.SecurityStamp, StringComparison.Ordinal))
+        // An empty token stamp means the user had no stamp when the token was issued
+        // (should not normally happen; Identity always generates one). Only validate
+        // when both sides have a non-empty value, to avoid rejecting valid tokens.
+        if (!string.IsNullOrEmpty(tokenStamp)
+            && !string.IsNullOrEmpty(user.SecurityStamp)
+            && !string.Equals(tokenStamp, user.SecurityStamp, StringComparison.Ordinal))
         {
             // Covers role changes, logout-everywhere, password resets and single-session logins.
             context.Fail("The security stamp has changed; acquire a new access token.");

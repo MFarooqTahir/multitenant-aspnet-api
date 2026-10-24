@@ -33,6 +33,9 @@ public sealed class JwtTokenGenerator(
             new(AuthClaims.Name, user.DisplayName),
             new(AuthClaims.Role, role),
             new(AuthClaims.SecurityStamp, user.SecurityStamp ?? string.Empty),
+            // Note: when user.SecurityStamp is null, an empty string is stored.
+            // The validator in JwtBearerConfiguration treats a missing/empty stamp
+            // as "skip stamp validation" — see ValidateLiveUserAsync.
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
         };
 

@@ -16,6 +16,7 @@ public sealed class AuthOptions
     public int RefreshTokenDays { get; set; } = 30;
 
     [Required]
+    [Url]
     public string PublicBaseUrl { get; set; } = "http://localhost:8080";
 
     [Range(1, 30)]

@@ -47,25 +47,33 @@ public sealed class RefreshTokenManager(
     public async Task RevokeFamilyAsync(Guid familyId, string reason, CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
-        await dbContext.RefreshTokens
+        var tokens = await dbContext.RefreshTokens
             .Where(x => x.FamilyId == familyId && x.RevokedAtUtc == null)
-            .ExecuteUpdateAsync(
-                setters => setters
-                    .SetProperty(x => x.RevokedAtUtc, now)
-                    .SetProperty(x => x.RevokedReason, reason),
-                cancellationToken);
+            .ToListAsync(cancellationToken);
+
+        foreach (var token in tokens)
+        {
+            token.RevokedAtUtc = now;
+            token.RevokedReason = reason;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     public async Task RevokeAllForUserAsync(Guid userId, string reason, CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
-        await dbContext.RefreshTokens
+        var tokens = await dbContext.RefreshTokens
             .Where(x => x.UserId == userId && x.RevokedAtUtc == null)
-            .ExecuteUpdateAsync(
-                setters => setters
-                    .SetProperty(x => x.RevokedAtUtc, now)
-                    .SetProperty(x => x.RevokedReason, reason),
-                cancellationToken);
+            .ToListAsync(cancellationToken);
+
+        foreach (var token in tokens)
+        {
+            token.RevokedAtUtc = now;
+            token.RevokedReason = reason;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     public static string CreateRawToken()

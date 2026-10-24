@@ -19,7 +19,11 @@ public sealed partial class AccountEmailService(
     public async Task SendConfirmationEmailAsync(AppUser user, CancellationToken cancellationToken)
     {
         var token = await userManager.GenerateEmailConfirmationTokenAsync(user);
-        var link = $"{_auth.PublicBaseUrl.TrimEnd('/')}/api/v1/auth/confirm-email?userId={user.Id}&token={Uri.EscapeDataString(token)}";
+
+        // The token is placed in the URL fragment, which browsers do not send to the
+        // server or include in Referer headers. The confirmation page reads it from
+        // JS and POSTs it in the request body to the confirm-email endpoint.
+        var link = $"{_auth.PublicBaseUrl.TrimEnd('/')}/confirm-email#userId={user.Id}&token={Uri.EscapeDataString(token)}";
         var message = new EmailMessage(
             user.Email ?? string.Empty,
             "Confirm your email address",

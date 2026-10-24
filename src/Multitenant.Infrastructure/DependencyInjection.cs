@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -116,6 +117,13 @@ public static class DependencyInjection
                 ? provider.GetRequiredService<SmtpEmailSender>()
                 : provider.GetRequiredService<LoggingEmailSender>();
         });
+
+        // Identity email confirmation tokens are signed with the Data Protection API.
+        // Keys default to the local filesystem. When running multiple instances
+        // (containers, load-balanced replicas) you MUST configure a shared key ring,
+        // e.g. Azure Key Vault, Redis, or a persistent shared volume, otherwise token
+        // validation fails across instances.
+        services.AddDataProtection();
 
         return services;
     }

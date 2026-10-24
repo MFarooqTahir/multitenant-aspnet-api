@@ -54,6 +54,10 @@ public sealed class AuthService(
             throw new UnauthorizedException();
         }
 
+        // The tenant context must be resolved before password verification: a failed
+        // attempt updates the user's lockout counters, and the auditing interceptor
+        // requires a resolved tenant for that write. The slug is client-supplied, so
+        // this does not leak tenant existence, and the context is scoped to the request.
         tenantContext.SetTenant(tenant.Id, tenant.Slug);
 
         var user = await FindUserByEmailAsync(tenant.Id, request.Email, cancellationToken);
@@ -247,6 +251,11 @@ public sealed class AuthService(
 
         var tenant = await FindTenantByIdAsync(user.TenantId, cancellationToken)
             ?? throw InvalidConfirmationToken();
+
+        if (!tenant.IsActive)
+        {
+            throw InvalidConfirmationToken();
+        }
 
         tenantContext.SetTenant(tenant.Id, tenant.Slug);
 
