@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Multitenant.Application.Abstractions;
+using Multitenant.Application.Abstractions.Tenancy;
 using Multitenant.Application.Errors;
+using Multitenant.Application.Errors.Exceptions;
 using Multitenant.Domain.Entities;
 
 namespace Multitenant.Infrastructure.Persistence;

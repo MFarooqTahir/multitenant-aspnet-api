@@ -1,7 +1,7 @@
-using Multitenant.Application.Contracts;
+using Multitenant.Application.Contracts.Users;
 using Multitenant.Domain.Entities;
 
-namespace Multitenant.Application.Abstractions;
+namespace Multitenant.Application.Abstractions.Tenancy;
 
 /// <summary>
 /// Creates the Identity user and assigns its first role. Both the administrative

@@ -1,6 +1,8 @@
-using Multitenant.Application.Contracts;
+using Multitenant.Application.Contracts.Auth;
+using Multitenant.Application.Contracts.Results;
+using Multitenant.Application.Contracts.Users;
 
-namespace Multitenant.Application.Abstractions;
+namespace Multitenant.Application.Abstractions.Identity;
 
 /// <summary>
 /// Login, registration, session and account-security operations.

@@ -4,8 +4,11 @@ using System.Text;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Multitenant.Application.Abstractions;
+using Multitenant.Application.Abstractions.Identity;
 using Multitenant.Application.Common;
 using Multitenant.Application.Configuration;
+using Multitenant.Application.Configuration.Auth;
+using Multitenant.Application.Configuration.Jwt;
 using Multitenant.Domain.Entities;
 
 namespace Multitenant.Infrastructure.Identity;

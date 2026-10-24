@@ -1,6 +1,7 @@
+using Multitenant.Application.Contracts.Common;
 using Multitenant.Domain.Entities;
 
-namespace Multitenant.Application.Contracts;
+namespace Multitenant.Application.Contracts.Tasks;
 
 public sealed class TaskQuery : PageQuery
 {

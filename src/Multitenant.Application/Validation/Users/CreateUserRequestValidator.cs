@@ -1,9 +1,9 @@
 using FluentValidation;
-using Multitenant.Application.Common;
-using Multitenant.Application.Contracts;
+using Multitenant.Application.Contracts.Users;
 using Multitenant.Domain.Entities;
+using PasswordRules = Multitenant.Application.Common.Security.PasswordRules;
 
-namespace Multitenant.Application.Validation;
+namespace Multitenant.Application.Validation.Users;
 
 public sealed class CreateUserRequestValidator : AbstractValidator<CreateUserRequest>
 {

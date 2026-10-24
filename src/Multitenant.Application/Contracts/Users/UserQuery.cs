@@ -1,4 +1,6 @@
-namespace Multitenant.Application.Contracts;
+using Multitenant.Application.Contracts.Common;
+
+namespace Multitenant.Application.Contracts.Users;
 
 public sealed class UserQuery : PageQuery
 {

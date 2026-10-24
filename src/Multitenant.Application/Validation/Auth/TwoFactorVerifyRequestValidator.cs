@@ -1,7 +1,7 @@
 using FluentValidation;
-using Multitenant.Application.Contracts;
+using Multitenant.Application.Contracts.Auth;
 
-namespace Multitenant.Application.Validation;
+namespace Multitenant.Application.Validation.Auth;
 
 public sealed class TwoFactorVerifyRequestValidator : AbstractValidator<TwoFactorVerifyRequest>
 {

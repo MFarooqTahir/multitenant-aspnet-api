@@ -1,4 +1,4 @@
-namespace Multitenant.Application.Configuration;
+namespace Multitenant.Application.Configuration.Identity;
 
 /// <summary>
 /// Feature switches for email confirmation and two-factor authentication.

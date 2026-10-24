@@ -1,4 +1,4 @@
-namespace Multitenant.Application.Contracts;
+namespace Multitenant.Application.Contracts.Tenants;
 
 public sealed record TenantResponse(
     Guid Id,

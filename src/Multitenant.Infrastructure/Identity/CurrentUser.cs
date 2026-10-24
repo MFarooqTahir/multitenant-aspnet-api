@@ -1,7 +1,10 @@
 using Microsoft.AspNetCore.Http;
 using Multitenant.Application.Abstractions;
+using Multitenant.Application.Abstractions.Identity;
+using Multitenant.Application.Abstractions.Tenancy;
 using Multitenant.Application.Common;
 using Multitenant.Application.Errors;
+using Multitenant.Application.Errors.Exceptions;
 
 namespace Multitenant.Infrastructure.Identity;
 

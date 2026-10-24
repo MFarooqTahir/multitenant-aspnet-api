@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Multitenant.Application.Abstractions;
+using Multitenant.Application.Abstractions.Tenancy;
 using Multitenant.Domain.Entities;
 
 namespace Multitenant.Infrastructure.Persistence;

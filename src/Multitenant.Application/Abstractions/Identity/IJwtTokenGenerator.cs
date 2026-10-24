@@ -1,6 +1,6 @@
 using Multitenant.Domain.Entities;
 
-namespace Multitenant.Application.Abstractions;
+namespace Multitenant.Application.Abstractions.Identity;
 
 /// <summary>Creates and validates the JWTs the API issues.</summary>
 public interface IJwtTokenGenerator

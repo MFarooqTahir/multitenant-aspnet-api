@@ -1,5 +1,9 @@
 using System.Net;
 using Multitenant.Application.Contracts;
+using Multitenant.Application.Contracts.Common;
+using Multitenant.Application.Contracts.Projects;
+using Multitenant.Application.Contracts.Tasks;
+using Multitenant.Application.Contracts.Users;
 using Multitenant.Domain.Entities;
 using Multitenant.IntegrationTests.Infrastructure;
 

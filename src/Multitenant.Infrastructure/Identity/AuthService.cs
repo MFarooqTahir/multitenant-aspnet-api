@@ -2,9 +2,18 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Multitenant.Application.Abstractions;
+using Multitenant.Application.Abstractions.Identity;
+using Multitenant.Application.Abstractions.Tenancy;
 using Multitenant.Application.Configuration;
+using Multitenant.Application.Configuration.Auth;
+using Multitenant.Application.Configuration.Identity;
+using Multitenant.Application.Configuration.Jwt;
 using Multitenant.Application.Contracts;
+using Multitenant.Application.Contracts.Auth;
+using Multitenant.Application.Contracts.Results;
+using Multitenant.Application.Contracts.Users;
 using Multitenant.Application.Errors;
+using Multitenant.Application.Errors.Exceptions;
 using Multitenant.Domain.Entities;
 using Multitenant.Infrastructure.Persistence;
 

@@ -5,7 +5,9 @@ using Microsoft.AspNetCore.RateLimiting;
 using Multitenant.Api.Authorization;
 using Multitenant.Api.RateLimiting;
 using Multitenant.Application.Abstractions;
+using Multitenant.Application.Abstractions.Tenancy;
 using Multitenant.Application.Contracts;
+using Multitenant.Application.Contracts.Tenants;
 
 namespace Multitenant.Api.Controllers;
 

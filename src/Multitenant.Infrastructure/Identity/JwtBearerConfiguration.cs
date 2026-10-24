@@ -7,8 +7,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using Multitenant.Application.Abstractions;
+using Multitenant.Application.Abstractions.Tenancy;
 using Multitenant.Application.Common;
 using Multitenant.Application.Configuration;
+using Multitenant.Application.Configuration.Jwt;
 using Multitenant.Domain.Entities;
 using Multitenant.Infrastructure.Persistence;
 

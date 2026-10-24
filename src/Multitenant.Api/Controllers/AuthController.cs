@@ -4,7 +4,11 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Multitenant.Api.RateLimiting;
 using Multitenant.Application.Abstractions;
+using Multitenant.Application.Abstractions.Identity;
 using Multitenant.Application.Contracts;
+using Multitenant.Application.Contracts.Auth;
+using Multitenant.Application.Contracts.Results;
+using Multitenant.Application.Contracts.Users;
 
 namespace Multitenant.Api.Controllers;
 

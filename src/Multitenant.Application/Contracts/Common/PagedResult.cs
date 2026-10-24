@@ -1,4 +1,4 @@
-namespace Multitenant.Application.Contracts;
+namespace Multitenant.Application.Contracts.Common;
 
 /// <summary>One page of results plus the counters a client needs for pagination.</summary>
 public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Page, int PageSize, int TotalCount)

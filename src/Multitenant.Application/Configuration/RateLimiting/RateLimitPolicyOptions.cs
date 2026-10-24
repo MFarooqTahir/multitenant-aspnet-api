@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Multitenant.Application.Configuration;
+namespace Multitenant.Application.Configuration.RateLimiting;
 
 public sealed class RateLimitPolicyOptions
 {

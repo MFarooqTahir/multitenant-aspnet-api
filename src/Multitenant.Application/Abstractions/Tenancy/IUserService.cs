@@ -1,6 +1,7 @@
-using Multitenant.Application.Contracts;
+using Multitenant.Application.Contracts.Common;
+using Multitenant.Application.Contracts.Users;
 
-namespace Multitenant.Application.Abstractions;
+namespace Multitenant.Application.Abstractions.Tenancy;
 
 /// <summary>
 /// Tenant-scoped user administration (list, read, create, change role, delete).

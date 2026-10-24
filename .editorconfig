@@ -1,0 +1,20 @@
+root = true
+
+[*.cs]
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Keep namespaces aligned with the folder structure. Applies in the IDE and in
+# `dotnet format`; no need to remember the convention by hand.
+dotnet_diagnostic.IDE0130.severity = suggestion
+csharp_style_namespace_declarations = file_scoped:suggestion
+
+[*.{json,yml,yaml}]
+indent_style = space
+indent_size = 2
+
+[*.{csproj,props,targets,slnx}]
+indent_style = space
+indent_size = 2

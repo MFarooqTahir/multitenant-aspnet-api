@@ -1,4 +1,6 @@
-namespace Multitenant.Application.Abstractions;
+using Multitenant.Application.Abstractions.Tenancy;
+
+namespace Multitenant.Application.Abstractions.Identity;
 
 /// <summary>
 /// The authenticated caller, read from the validated JWT.

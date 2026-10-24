@@ -1,4 +1,4 @@
-namespace Multitenant.Application.Common;
+namespace Multitenant.Application.Common.Paging;
 
 /// <summary>
 /// Parses the <c>sort</c> query parameter: <c>field</c> ascending, <c>-field</c>

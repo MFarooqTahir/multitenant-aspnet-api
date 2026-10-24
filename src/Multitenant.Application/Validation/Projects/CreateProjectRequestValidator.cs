@@ -1,7 +1,7 @@
 using FluentValidation;
-using Multitenant.Application.Contracts;
+using Multitenant.Application.Contracts.Projects;
 
-namespace Multitenant.Application.Validation;
+namespace Multitenant.Application.Validation.Projects;
 
 public sealed class CreateProjectRequestValidator : AbstractValidator<CreateProjectRequest>
 {

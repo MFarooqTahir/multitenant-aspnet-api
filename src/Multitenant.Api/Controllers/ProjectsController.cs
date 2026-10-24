@@ -3,7 +3,10 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Multitenant.Api.Authorization;
 using Multitenant.Application.Abstractions;
+using Multitenant.Application.Abstractions.Tenancy;
 using Multitenant.Application.Contracts;
+using Multitenant.Application.Contracts.Common;
+using Multitenant.Application.Contracts.Projects;
 
 namespace Multitenant.Api.Controllers;
 

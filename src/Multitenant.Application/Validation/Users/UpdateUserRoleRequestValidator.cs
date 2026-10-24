@@ -1,8 +1,8 @@
 using FluentValidation;
-using Multitenant.Application.Contracts;
+using Multitenant.Application.Contracts.Users;
 using Multitenant.Domain.Entities;
 
-namespace Multitenant.Application.Validation;
+namespace Multitenant.Application.Validation.Users;
 
 public sealed class UpdateUserRoleRequestValidator : AbstractValidator<UpdateUserRoleRequest>
 {
