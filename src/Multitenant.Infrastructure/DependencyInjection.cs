@@ -4,11 +4,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-using Multitenant.Application.Abstractions;
 using Multitenant.Application.Abstractions.Identity;
 using Multitenant.Application.Abstractions.Messaging;
 using Multitenant.Application.Abstractions.Tenancy;
-using Multitenant.Application.Configuration;
+using Multitenant.Application.Common.Security;
 using Multitenant.Application.Configuration.Auth;
 using Multitenant.Application.Configuration.Database;
 using Multitenant.Application.Configuration.Email;
@@ -63,11 +62,15 @@ public static class DependencyInjection
             {
                 options.User.RequireUniqueEmail = false;
                 options.User.AllowedUserNameCharacters += ":";
-                options.Password.RequiredLength = 12;
-                options.Password.RequireDigit = true;
-                options.Password.RequireLowercase = true;
-                options.Password.RequireUppercase = true;
-                options.Password.RequireNonAlphanumeric = true;
+
+                // One source of truth for the password policy: the same constants
+                // feed FluentValidation and Identity.
+                options.Password.RequiredLength = PasswordRules.MinimumLength;
+                options.Password.RequireDigit = PasswordRules.RequireDigit;
+                options.Password.RequireLowercase = PasswordRules.RequireLowercase;
+                options.Password.RequireUppercase = PasswordRules.RequireUppercase;
+                options.Password.RequireNonAlphanumeric = PasswordRules.RequireNonAlphanumeric;
+
                 options.Lockout.MaxFailedAccessAttempts = 5;
                 options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(5);
                 options.Lockout.AllowedForNewUsers = true;
@@ -98,7 +101,6 @@ public static class DependencyInjection
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<ITenantService, TenantService>();
         services.AddScoped<IUserService, UserService>();
-        services.AddScoped<IUserProvisioningService, UserProvisioningService>();
         services.AddScoped<IUserProvisioningService, UserProvisioningService>();
         services.AddScoped<IProjectService, ProjectService>();
         services.AddScoped<ITaskService, TaskService>();
@@ -138,6 +140,9 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(EmailOptions.SectionName))
             .ValidateDataAnnotations()
             .Validate(
+                options => IsKnownEmailProvider(options.Provider),
+                "Email:Provider must be 'Logging' or 'Smtp'.")
+            .Validate(
                 options => !string.Equals(options.Provider, "Smtp", StringComparison.OrdinalIgnoreCase)
                     || !string.IsNullOrWhiteSpace(options.Smtp.Host),
                 "Email:Smtp:Host is required when Email:Provider is 'Smtp'.")
@@ -156,4 +161,8 @@ public static class DependencyInjection
         services.AddOptions<CorsOptions>()
             .Bind(configuration.GetSection(CorsOptions.SectionName));
     }
+
+    private static bool IsKnownEmailProvider(string provider) =>
+        string.Equals(provider, "Logging", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(provider, "Smtp", StringComparison.OrdinalIgnoreCase);
 }

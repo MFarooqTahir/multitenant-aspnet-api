@@ -9,8 +9,8 @@ A practical guide for the next engineer or AI agent picking up this repository.
 | Area | State |
 | --- | --- |
 | Build | `dotnet build multitenant-aspnet-api.slnx` succeeds with 0 warnings (warnings are errors) |
-| Unit tests | 31 passing |
-| Integration tests | 26 passing against Testcontainers PostgreSQL 16 |
+| Unit tests | 32 passing |
+| Integration tests | 50 passing against Testcontainers PostgreSQL 16 |
 | API surface | Auth, tenants, users, projects, tasks, health, OpenAPI |
 | Migrations | `Persistence/Migrations/20261024141223_InitialCreate` applied automatically in Development |
 | Docker | `Dockerfile` and `compose.yaml` are current; image builds |
@@ -112,6 +112,8 @@ cross-platform.
 | Validators | `src/Multitenant.Application/Validation/` (one validator per file) |
 | Config options | `src/Multitenant.Application/Configuration/` (one options class per file) |
 | Policies | `src/Multitenant.Api/Authorization/Policies.cs` |
+| Forwarded headers (proxy support) | `src/Multitenant.Api/Configuration/ForwardedHeadersSettings.cs` |
+| OpenAPI bearer scheme | `src/Multitenant.Api/OpenApi/BearerSecuritySchemeTransformer.cs` |
 | Error handling | `src/Multitenant.Api/Middleware/GlobalExceptionHandler.cs`, `ProblemDetailsStatusCodePages.cs` |
 | Rate limiting | `src/Multitenant.Api/RateLimiting/RateLimitingSetup.cs` |
 | Test harness | `tests/Multitenant.IntegrationTests/Infrastructure/IntegrationHarness.cs` |
@@ -158,9 +160,12 @@ cross-platform.
 - **Status codes**: validation 400 (`validation_failed`), auth 401, role 403, missing/foreign
   resource 404, duplicates 409, rate limit 429 (`rate_limited`), disabled feature 404
   (`feature_disabled`).
-- **Health checks** are anonymous: `/health`, `/health/live`, `/health/ready`.
-- **OpenAPI** is versioned (`/openapi/v1.json`); Scalar is at `/scalar`. The bearer scheme is
-  not declared in the document yet, so paste the token into Scalar's auth UI manually.
+- **Health checks** are anonymous: `/health`, `/health/live`, `/health/ready`. They bypass
+  rate limiting so probes never report false failures.
+- **Email confirmation** works even when `Identity:RequireConfirmedEmail=false`; resend is a
+  no-op `202` in that mode.
+- **OpenAPI** is versioned (`/openapi/v1.json`); Scalar is at `/scalar` and shows a bearer
+  authentication panel from the declared scheme.
 
 ---
 
@@ -201,11 +206,10 @@ cross-platform.
 1. Replace slug-based self-registration with signed invites (the only "open door").
 2. Add a background job to purge expired/revoked refresh tokens.
 3. Distributed rate limiting (Redis) for multi-replica deployments.
-4. OpenAPI bearer security scheme + Scalar prefill.
-5. Per-resource permissions (project membership) instead of tenant-wide roles.
-6. Persisted audit trail for security events.
-7. Templated emails and a real provider (SES / Azure Communication Services).
-8. Optional caching of the per-request user/security-stamp lookup.
+4. Per-resource permissions (project membership) instead of tenant-wide roles.
+5. Persisted audit trail for security events.
+6. Templated emails and a real provider (SES / Azure Communication Services).
+7. Optional caching of the per-request user/security-stamp lookup.
 
 ---
 
@@ -231,8 +235,8 @@ cross-platform.
 
 1. `git status` — expect a clean tree.
 2. `dotnet build multitenant-aspnet-api.slnx` — expect 0 warnings.
-3. `dotnet test tests/Multitenant.UnitTests` — expect 31 passing.
-4. Start Docker, then `dotnet test tests/Multitenant.IntegrationTests` — expect 26 passing.
+3. `dotnet test tests/Multitenant.UnitTests` — expect 32 passing.
+4. Start Docker, then `dotnet test tests/Multitenant.IntegrationTests` — expect 50 passing.
 5. `docker compose up --build`, open <http://localhost:8080/scalar>, log in as
    `owner@acme.test` / `Demo123!Passw0rd`.
 6. Skim `docs/architecture.md` and the ADRs before changing tenant or auth behaviour.

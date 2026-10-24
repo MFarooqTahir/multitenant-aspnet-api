@@ -1,12 +1,8 @@
 using Microsoft.EntityFrameworkCore;
-using Multitenant.Application.Abstractions;
 using Multitenant.Application.Abstractions.Tenancy;
-using Multitenant.Application.Common;
 using Multitenant.Application.Common.Paging;
-using Multitenant.Application.Contracts;
 using Multitenant.Application.Contracts.Common;
 using Multitenant.Application.Contracts.Tasks;
-using Multitenant.Application.Errors;
 using Multitenant.Application.Errors.Exceptions;
 using Multitenant.Domain.Entities;
 using Multitenant.Infrastructure.Persistence;
@@ -129,6 +125,7 @@ public sealed class TaskService(
             Status = request.Status,
             Priority = request.Priority,
             AssigneeUserId = request.AssigneeUserId,
+            AssigneeTenantId = request.AssigneeUserId is null ? null : tenantId,
             DueDate = request.DueDate,
             CreatedAtUtc = timeProvider.GetUtcNow(),
             UpdatedAtUtc = timeProvider.GetUtcNow(),
@@ -156,6 +153,7 @@ public sealed class TaskService(
         task.Status = request.Status;
         task.Priority = request.Priority;
         task.AssigneeUserId = request.AssigneeUserId;
+        task.AssigneeTenantId = request.AssigneeUserId is null ? null : task.TenantId;
         task.DueDate = request.DueDate;
 
         await dbContext.SaveChangesAsync(cancellationToken);

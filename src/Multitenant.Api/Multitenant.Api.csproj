@@ -4,6 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <Description>Production-minded multi-tenant SaaS API built with ASP.NET Core 10, EF Core and PostgreSQL.</Description>
   </PropertyGroup>
 
   <ItemGroup>

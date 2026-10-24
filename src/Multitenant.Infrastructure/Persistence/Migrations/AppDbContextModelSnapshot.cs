@@ -364,6 +364,9 @@ namespace Multitenant.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("AssigneeTenantId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid?>("AssigneeUserId")
                         .HasColumnType("uuid");
 
@@ -403,7 +406,7 @@ namespace Multitenant.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("AssigneeUserId");
+                    b.HasIndex("AssigneeTenantId", "AssigneeUserId");
 
                     b.HasIndex("TenantId", "AssigneeUserId");
 
@@ -413,7 +416,10 @@ namespace Multitenant.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TenantId", "Status");
 
-                    b.ToTable("WorkItems", (string)null);
+                    b.ToTable("WorkItems", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_WorkItems_AssigneeTenant", "\"AssigneeTenantId\" IS NULL OR \"AssigneeTenantId\" = \"TenantId\"");
+                        });
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>
@@ -500,7 +506,8 @@ namespace Multitenant.Infrastructure.Persistence.Migrations
                 {
                     b.HasOne("Multitenant.Domain.Entities.AppUser", "Assignee")
                         .WithMany()
-                        .HasForeignKey("AssigneeUserId")
+                        .HasForeignKey("AssigneeTenantId", "AssigneeUserId")
+                        .HasPrincipalKey("TenantId", "Id")
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("Multitenant.Domain.Entities.Project", "Project")

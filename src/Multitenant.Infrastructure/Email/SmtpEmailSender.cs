@@ -3,9 +3,7 @@ using MailKit.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MimeKit;
-using Multitenant.Application.Abstractions;
 using Multitenant.Application.Abstractions.Messaging;
-using Multitenant.Application.Configuration;
 using Multitenant.Application.Configuration.Email;
 
 namespace Multitenant.Infrastructure.Email;

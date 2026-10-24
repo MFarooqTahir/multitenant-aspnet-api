@@ -1,11 +1,10 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Multitenant.Application.Abstractions;
+using Microsoft.Extensions.Logging;
 using Multitenant.Application.Abstractions.Tenancy;
 using Multitenant.Application.Common;
-using Multitenant.Application.Contracts;
 using Multitenant.Application.Contracts.Users;
-using Multitenant.Application.Errors;
 using Multitenant.Application.Errors.Exceptions;
 using Multitenant.Domain.Entities;
 using Multitenant.Infrastructure.Persistence;
@@ -18,10 +17,11 @@ namespace Multitenant.Infrastructure.Identity;
 /// whether the caller is allowed to do so. Email delivery is the caller's job,
 /// because onboarding must send it only after its transaction commits.
 /// </summary>
-public sealed class UserProvisioningService(
+public sealed partial class UserProvisioningService(
     AppDbContext dbContext,
     UserManager<AppUser> userManager,
-    TimeProvider timeProvider) : IUserProvisioningService
+    TimeProvider timeProvider,
+    ILogger<UserProvisioningService> logger) : IUserProvisioningService
 {
     public async Task<AppUser> CreateAsync(
         Guid tenantId,
@@ -60,11 +60,25 @@ public sealed class UserProvisioningService(
         };
 
         EnsureSucceeded(await userManager.CreateAsync(user, password), "user_creation_failed");
-        EnsureSucceeded(await userManager.AddToRoleAsync(user, role), "role_assignment_failed");
+
+        var roleAssigned = await userManager.AddToRoleAsync(user, role);
+        if (!roleAssigned.Succeeded)
+        {
+            // Never leave a half-provisioned account (user without a role) behind.
+            var cleanup = await userManager.DeleteAsync(user);
+            if (!cleanup.Succeeded)
+            {
+                LogCleanupFailed(logger, user.Id);
+            }
+
+            throw new ConflictException(
+                string.Join(" ", roleAssigned.Errors.Select(x => x.Description)),
+                "role_assignment_failed");
+        }
 
         return user;
     }
-
+    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "Implements IUserProvisioningService")]
     public UserResponse ToResponse(AppUser user, string role) =>
         new(
             user.Id,
@@ -83,4 +97,10 @@ public sealed class UserProvisioningService(
                 code);
         }
     }
+
+    [LoggerMessage(
+        EventId = 2002,
+        Level = LogLevel.Error,
+        Message = "Could not delete partially provisioned user {UserId}; manual cleanup is required.")]
+    private static partial void LogCleanupFailed(ILogger logger, Guid userId);
 }

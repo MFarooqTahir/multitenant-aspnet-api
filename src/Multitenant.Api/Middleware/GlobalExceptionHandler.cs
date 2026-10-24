@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Diagnostics;
-using Microsoft.AspNetCore.Mvc;
 using Multitenant.Api.ErrorHandling;
 using Multitenant.Application.Errors;
 using Multitenant.Domain.Entities;

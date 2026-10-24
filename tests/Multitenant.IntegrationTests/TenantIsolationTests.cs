@@ -1,5 +1,4 @@
 using System.Net;
-using Multitenant.Application.Contracts;
 using Multitenant.Application.Contracts.Common;
 using Multitenant.Application.Contracts.Projects;
 using Multitenant.Application.Contracts.Tasks;

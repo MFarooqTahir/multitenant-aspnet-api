@@ -33,6 +33,7 @@
       Demo__Password: ${DEMO_PASSWORD:-Demo123!Passw0rd}
       Database__AutoMigrate: "true"
       Database__SeedDemoData: "true"
+      Auth__PublicBaseUrl: "http://localhost:${API_PORT:-8080}"
 
 volumes:
   postgres-data:

@@ -5,13 +5,13 @@ using Microsoft.ApplicationInsights.Extensibility;
 using Serilog.Events;
 using Serilog.Sinks.ApplicationInsights.TelemetryConverters;
 using Multitenant.Api.Authorization;
+using Multitenant.Api.Configuration;
 using Multitenant.Api.Filters;
 using Multitenant.Api.Middleware;
+using Multitenant.Api.OpenApi;
 using Multitenant.Api.RateLimiting;
 using Multitenant.Application.Common;
-using Multitenant.Application.Configuration;
 using Multitenant.Application.Configuration.Web;
-using Multitenant.Application.Validation;
 using Multitenant.Application.Validation.Tenants;
 using Multitenant.Infrastructure;
 using Multitenant.Infrastructure.Persistence;
@@ -55,6 +55,17 @@ builder.Host.UseSerilog((context, services, loggerConfiguration) =>
 
 builder.Services.AddInfrastructure(builder.Configuration);
 
+var forwardedHeaders = builder.Configuration
+    .GetSection(ForwardedHeadersSettings.SectionName)
+    .Get<ForwardedHeadersSettings>() ?? new ForwardedHeadersSettings();
+
+if (forwardedHeaders.Enabled)
+{
+    // Validate the proxy configuration at startup instead of at the first request.
+    forwardedHeaders.Apply(new ForwardedHeadersOptions());
+    builder.Services.Configure<ForwardedHeadersOptions>(forwardedHeaders.Apply);
+}
+
 builder.Services.AddControllers(options => options.Filters.Add<ValidationFilter>());
 
 builder.Services.AddScoped<ValidationFilter>();
@@ -87,8 +98,7 @@ builder.Services
         options.GroupNameFormat = "'v'VVV";
         options.SubstituteApiVersionInUrl = true;
     })
-    .AddOpenApi();
-
+    .AddOpenApi(options => options.Document.AddDocumentTransformer<BearerSecuritySchemeTransformer>());
 
 builder.Services.AddAuthorization(Policies.Configure);
 
@@ -108,6 +118,11 @@ if (cors.AllowedOrigins.Length > 0)
 }
 
 var app = builder.Build();
+
+if (forwardedHeaders.Enabled)
+{
+    app.UseForwardedHeaders();
+}
 
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseExceptionHandler();
@@ -130,15 +145,15 @@ app.UseAuthorization();
 
 app.MapControllers();
 
-app.MapHealthChecks("/health");
+app.MapHealthChecks("/health").DisableRateLimiting();
 app.MapHealthChecks("/health/live", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     Predicate = check => check.Tags.Contains("live"),
-});
+}).DisableRateLimiting();
 app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     Predicate = check => check.Tags.Contains("ready"),
-});
+}).DisableRateLimiting();
 
 app.MapOpenApi().WithDocumentPerVersion();
 app.MapScalarApiReference(options => options

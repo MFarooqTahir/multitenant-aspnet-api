@@ -1,11 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Multitenant.Application.Abstractions;
 using Multitenant.Application.Abstractions.Identity;
 using Multitenant.Application.Abstractions.Tenancy;
-using Multitenant.Application.Contracts;
 using Multitenant.Application.Contracts.Tenants;
-using Multitenant.Application.Errors;
 using Multitenant.Application.Errors.Exceptions;
 using Multitenant.Domain.Entities;
 using Multitenant.Infrastructure.Persistence;

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
-using Multitenant.Application.Contracts;
+using Microsoft.AspNetCore.Builder;
+using Multitenant.Api.Configuration;
 using Multitenant.Application.Contracts.Auth;
 using Multitenant.Application.Contracts.Projects;
 using Multitenant.Application.Contracts.Tenants;
@@ -35,6 +36,14 @@ public sealed class PlatformTests : IntegrationTestBase
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.True(document.RootElement.GetProperty("paths").TryGetProperty("/api/v1/auth/login", out _));
+
+        var scheme = document.RootElement
+            .GetProperty("components")
+            .GetProperty("securitySchemes")
+            .GetProperty("Bearer");
+
+        Assert.Equal("bearer", scheme.GetProperty("scheme").GetString());
+        Assert.Equal("JWT", scheme.GetProperty("bearerFormat").GetString());
     }
 
     [Fact]
@@ -83,7 +92,7 @@ public sealed class PlatformTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task UnknownResolveReturnsProblemDetails()
+    public async Task ProtectedResourceRequiresAuthentication()
     {
         using var client = CreateClient();
 
@@ -91,6 +100,84 @@ public sealed class PlatformTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Fact]
+    public async Task UnknownRoutesReturnNotFoundProblem()
+    {
+        using var client = CreateClient();
+
+        var response = await client.GetApi("/api/v1/does-not-exist");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+
+        var problem = await response.ReadAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
+        Assert.Equal("not_found", problem.Extensions["code"]?.ToString());
+    }
+
+    [Fact]
+    public async Task WrongMethodsReturnMethodNotAllowedProblem()
+    {
+        using var client = CreateClient();
+        var tokens = await Scenarios.OnboardAndLoginAsync(client, "platform-method", "method@acme.test");
+
+        var response = await client.DeleteApi("/api/v1/projects", bearer: tokens.AccessToken);
+
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+
+        var problem = await response.ReadAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
+        Assert.Equal("method_not_allowed", problem.Extensions["code"]?.ToString());
+    }
+
+    [Fact]
+    public async Task UnsupportedApiVersionsReturnNotFound()
+    {
+        using var client = CreateClient();
+        var tokens = await Scenarios.OnboardAndLoginAsync(client, "platform-version", "version@acme.test");
+
+        var response = await client.GetApi("/api/v2/projects", tokens.AccessToken);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public void InvalidEmailProviderFailsStartup()
+    {
+        using var factory = Harness.CreateFactory(configuration =>
+            configuration["Email:Provider"] = "CarrierPigeon");
+
+        Assert.ThrowsAny<Exception>(factory.CreateClient);
+    }
+
+    [Fact]
+    public void ShortSigningKeyFailsStartup()
+    {
+        using var factory = Harness.CreateFactory(configuration =>
+            configuration["Jwt:SigningKey"] = "too-short");
+
+        Assert.ThrowsAny<Exception>(factory.CreateClient);
+    }
+
+    [Fact]
+    public void ForwardedProxyConfigurationIsValidated()
+    {
+        var invalidProxy = new ForwardedHeadersSettings { KnownProxies = ["not-an-ip"] };
+        Assert.Throws<InvalidOperationException>(
+            () => invalidProxy.Apply(new ForwardedHeadersOptions()));
+
+        var invalidNetwork = new ForwardedHeadersSettings { KnownNetworks = ["10.0.0.0/99"] };
+        Assert.Throws<InvalidOperationException>(
+            () => invalidNetwork.Apply(new ForwardedHeadersOptions()));
+
+        var valid = new ForwardedHeadersSettings
+        {
+            KnownProxies = ["10.0.0.1"],
+            KnownNetworks = ["10.0.0.0/8", "2001:db8::/32"],
+        };
+
+        valid.Apply(new ForwardedHeadersOptions());
     }
 
     [Fact]

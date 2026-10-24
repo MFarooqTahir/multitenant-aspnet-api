@@ -1,11 +1,12 @@
 using System.Net;
-using System.Net.Http.Json;
-using Multitenant.Application.Contracts;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Multitenant.Application.Contracts.Auth;
 using Multitenant.Application.Contracts.Common;
 using Multitenant.Application.Contracts.Tenants;
 using Multitenant.Application.Contracts.Users;
 using Multitenant.IntegrationTests.Infrastructure;
+using Multitenant.Infrastructure.Persistence;
 
 namespace Multitenant.IntegrationTests;
 
@@ -209,5 +210,105 @@ public sealed class AuthLifecycleTests : IntegrationTestBase
 
         var list = await client.GetApi("/api/v1/users", memberTokens.AccessToken);
         Assert.Equal(HttpStatusCode.Forbidden, list.StatusCode);
+    }
+
+    [Fact]
+    public async Task ConcurrentRefreshLetsExactlyOneRequestWin()
+    {
+        using var client = CreateClient();
+        var tokens = await Scenarios.OnboardAndLoginAsync(client, "auth-concurrent", "concurrent@acme.test");
+
+        var requests = new[]
+        {
+            client.PostApi("/api/v1/auth/refresh", new RefreshTokenRequest(tokens.RefreshToken)),
+            client.PostApi("/api/v1/auth/refresh", new RefreshTokenRequest(tokens.RefreshToken)),
+        };
+
+        var responses = await Task.WhenAll(requests);
+
+        Assert.Single(responses, response => response.StatusCode == HttpStatusCode.OK);
+        Assert.Single(responses, response => response.StatusCode == HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task ExpiredRefreshTokenIsRejected()
+    {
+        await using var factory = Harness.CreateFactory();
+        using var client = factory.CreateClient();
+        var tokens = await Scenarios.OnboardAndLoginAsync(client, "auth-expiry", "expiry@acme.test");
+
+        var me = await client.GetApi("/api/v1/users/me", tokens.AccessToken);
+        var user = await me.ReadAsync<UserResponse>();
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var stored = await dbContext.RefreshTokens
+                .Where(x => x.UserId == user.Id && x.RevokedAtUtc == null)
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .FirstAsync();
+
+            stored.ExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1);
+            await dbContext.SaveChangesAsync();
+        }
+
+        var refresh = await client.PostApi(
+            "/api/v1/auth/refresh",
+            new RefreshTokenRequest(tokens.RefreshToken));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, refresh.StatusCode);
+
+        var problem = await refresh.ReadAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
+        Assert.Equal("refresh_token_expired", problem.Extensions["code"]?.ToString());
+    }
+
+    [Fact]
+    public async Task SingleSessionCanBeDisabledForMultipleDevices()
+    {
+        await using var factory = Harness.CreateFactory(configuration =>
+            configuration["Auth:SingleSessionPerUser"] = "false");
+        using var client = factory.CreateClient();
+
+        await Scenarios.OnboardAsync(client, "auth-multi", "Multi Device", "multi@acme.test");
+        var first = await Scenarios.LoginAsync(client, "auth-multi", "multi@acme.test", Scenarios.Password);
+        var second = await Scenarios.LoginAsync(client, "auth-multi", "multi@acme.test", Scenarios.Password);
+
+        var firstAccess = await client.GetApi("/api/v1/tenants/current", first.AccessToken);
+        var secondAccess = await client.GetApi("/api/v1/tenants/current", second.AccessToken);
+
+        Assert.Equal(HttpStatusCode.OK, firstAccess.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, secondAccess.StatusCode);
+
+        var firstRefresh = await client.PostApi(
+            "/api/v1/auth/refresh",
+            new RefreshTokenRequest(first.RefreshToken));
+        var secondRefresh = await client.PostApi(
+            "/api/v1/auth/refresh",
+            new RefreshTokenRequest(second.RefreshToken));
+
+        Assert.Equal(HttpStatusCode.OK, firstRefresh.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, secondRefresh.StatusCode);
+    }
+
+    [Fact]
+    public async Task RepeatedBadPasswordsLockTheAccount()
+    {
+        using var client = CreateClient();
+        await Scenarios.OnboardAsync(client, "auth-lockout", "Lockout", "lockout@acme.test");
+
+        var badLogin = new LoginRequest("auth-lockout", "lockout@acme.test", "WrongPassword1!");
+
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            var response = await client.PostApi("/api/v1/auth/login", badLogin);
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        // Even the correct password is rejected while the account is locked out.
+        var correct = await client.PostApi(
+            "/api/v1/auth/login",
+            new LoginRequest("auth-lockout", "lockout@acme.test", Scenarios.Password));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, correct.StatusCode);
     }
 }

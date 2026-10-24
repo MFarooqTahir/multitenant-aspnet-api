@@ -4,7 +4,7 @@
 ![ASP.NET Core](https://img.shields.io/badge/ASP.NET%20Core-10-512BD4)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791)
 ![EF Core](https://img.shields.io/badge/EF%20Core-10-512BD4)
-![Tests](https://img.shields.io/badge/tests-57%20passing-2ea44f)
+![Tests](https://img.shields.io/badge/tests-unit%20%2B%20integration-2ea44f)
 ![Licence](https://img.shields.io/badge/licence-MIT-blue)
 
 A production-minded, multi-tenant SaaS backend written in ASP.NET Core 10 and EF Core 10 on
@@ -147,8 +147,10 @@ mistake in one layer does not become a data leak:
    tenant and throws if an insert, update or delete targets a different tenant. Timestamps are
    stamped in the same place.
 4. **The database knows about tenancy.** `WorkItems` references `Projects` on
-   `(TenantId, ProjectId)`, and `Projects` has an alternate key on `(TenantId, Id)`. A task
-   physically cannot belong to another tenant's project.
+   `(TenantId, ProjectId)`, and `Projects` has an alternate key on `(TenantId, Id)`. A task's
+   assignee is protected the same way: `(AssigneeTenantId, AssigneeUserId)` references
+   `AppUser (TenantId, Id)`, and a check constraint requires `AssigneeTenantId = TenantId`.
+   Cross-tenant links are therefore impossible even with direct SQL, not just through the API.
 5. **The API hides existence.** A cross-tenant id produces `404` from the filtered query, not
    `403`.
 
@@ -253,6 +255,9 @@ Both are fully implemented and disabled by default so the demo is frictionless:
 `POST /auth/2fa/setup` returns an authenticator key and `otpauth://` URI. Because Identity's
 key reset rotates the security stamp, clients re-authenticate before calling
 `/auth/2fa/enable` with the first TOTP code. The integration test walks exactly this flow.
+
+Confirmation links always work, even with `Identity:RequireConfirmedEmail=false` (the flag
+gates login, not the ability to confirm); resend is a no-op `202` in that mode.
 
 Email delivery is provider-based: `Logging` writes the message to the log; `Smtp` uses MailKit
 with the settings under `Email:Smtp`.
@@ -398,6 +403,10 @@ Configuration is standard ASP.NET Core: `appsettings.json`, then
 | Key | Default | Notes |
 | --- | --- | --- |
 | `ConnectionStrings:Postgres` | empty | Required at runtime. Npgsql connection string |
+| `ForwardedHeaders:Enabled` | `false` | Trust `X-Forwarded-For`/`X-Forwarded-Proto` from a proxy |
+| `ForwardedHeaders:ForwardLimit` | `1` | Number of proxies in front of the API |
+| `ForwardedHeaders:KnownProxies` | `[]` | Proxy IPs allowed to set forwarding headers |
+| `ForwardedHeaders:KnownNetworks` | `[]` | Proxy networks in CIDR form, e.g. `10.0.0.0/8` |
 | `Jwt:Issuer` | `multitenant-aspnet-api` | Validated on every token |
 | `Jwt:Audience` | `multitenant-aspnet-api` | Validated on every token |
 | `Jwt:SigningKey` | empty | **Required.** Minimum 32 characters |
@@ -535,24 +544,29 @@ curl -s http://localhost:5270/api/v1/tenants/onboard \
 dotnet test multitenant-aspnet-api.slnx
 ```
 
-**Unit tests** (`tests/Multitenant.UnitTests`, 31 tests) cover domain invariants (slug and
-password rules), pagination/sorting, claim generation, 2FA challenge validation and refresh
-token hashing. They run in milliseconds and need no infrastructure.
+**Unit tests** (`tests/Multitenant.UnitTests`, 32 tests) cover domain invariants (slug and
+password rules), pagination/sorting (including offset overflow), claim generation, 2FA
+challenge validation and refresh token hashing. They run in milliseconds and need no
+infrastructure.
 
-**Integration tests** (`tests/Multitenant.IntegrationTests`, 26 tests) boot the real API with
+**Integration tests** (`tests/Multitenant.IntegrationTests`, 50 tests) boot the real API with
 `WebApplicationFactory<IApiMarker>` against a real PostgreSQL 16 container managed by
 Testcontainers. They cover:
 
 - tenant isolation for projects, tasks and users, including cross-tenant writes;
 - cross-tenant assignee rejection;
-- refresh rotation, reuse detection and family revocation;
-- single-session enforcement;
+- refresh rotation, reuse detection and family revocation, expiry and concurrent rotation;
+- single-session enforcement and the multi-device (`SingleSessionPerUser=false`) path;
 - role-change invalidation and refreshed role claims;
-- logout and logout-all;
-- registration, duplicate email handling and Member restrictions;
-- email-confirmation and two-factor feature flags, including a real TOTP code round-trip;
-- per-IP and per-tenant rate limiting;
-- health checks, OpenAPI, validation errors, correlation ids and problem-details shape.
+- logout, logout-all and account lockout after repeated bad passwords;
+- registration, duplicate email handling, Member restrictions and the Owner/Admin matrix;
+- email confirmation end-to-end (captured email) and resend behaviour;
+- two-factor enable, login challenge, recovery-code single use and disable;
+- paging, sorting, search and status/priority/date filters;
+- per-IP and per-tenant rate limiting, including tenant isolation and health exemptions;
+- startup configuration validation (JWT key, email provider, forwarded proxies);
+- health checks, OpenAPI (including the bearer scheme), validation errors, 404/405,
+  correlation ids and problem-details shape.
 
 Docker must be running for the integration suite. The collection fixture starts one container
 per run and shares it across tests; each test uses unique tenant slugs so tests do not collide.
@@ -587,6 +601,8 @@ Production deployments should:
 - set `Database:SeedDemoData=false`;
 - provide `ConnectionStrings__Postgres` and `Jwt__SigningKey` from the platform secret store;
 - terminate TLS at the ingress/reverse proxy (the app serves plain HTTP on 8080);
+- enable `ForwardedHeaders` and list the ingress proxies/networks so per-IP rate limiting
+  and logs see the real client address;
 - use the `Smtp` email provider (or add a provider-specific `IEmailSender`);
 - run at least two replicas behind a load balancer.
 
@@ -710,8 +726,6 @@ These are deliberate scope cuts, not oversights:
   or a retention job is needed.
 - **Rate limiting is in-process.** With multiple replicas the effective limit is per replica;
   a Redis-backed limiter is the next step.
-- **OpenAPI does not yet declare the bearer scheme**, so Scalar's auth panel needs the token
-  pasted manually. A document transformer is a small follow-up.
 - **Permissions are role-based, not per-resource.** A future iteration could add fine-grained
   policies (for example, project-scoped membership).
 - **No audit trail table.** Security events are logged but not persisted as domain records.

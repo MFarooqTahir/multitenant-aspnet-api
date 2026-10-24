@@ -25,8 +25,9 @@ Use a shared schema with `TenantId` on every tenant-owned table, enforced at sev
 3. **Write isolation** — a `SaveChanges` interceptor stamps `TenantId` on inserts and rejects
    inserts/updates/deletes whose `TenantId` differs from the resolved tenant.
 4. **Referential isolation** — `WorkItem → Project` uses a composite foreign key on
-   `(TenantId, ProjectId)`, so a task cannot reference another tenant's project even if the
-   application guard were bypassed.
+   `(TenantId, ProjectId)`, and `WorkItem → AppUser` uses `(AssigneeTenantId, AssigneeUserId)`
+   with a check constraint requiring `AssigneeTenantId = TenantId`. A task cannot reference
+   another tenant's project or user even if the application guard were bypassed.
 5. **API semantics** — cross-tenant reads and writes return **404**, not 403, so the API
    does not confirm that a resource exists in another tenant.
 

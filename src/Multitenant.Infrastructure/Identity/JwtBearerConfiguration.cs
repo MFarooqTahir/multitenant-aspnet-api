@@ -1,15 +1,12 @@
 using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
-using Multitenant.Application.Abstractions;
 using Multitenant.Application.Abstractions.Tenancy;
 using Multitenant.Application.Common;
-using Multitenant.Application.Configuration;
 using Multitenant.Application.Configuration.Jwt;
 using Multitenant.Domain.Entities;
 using Multitenant.Infrastructure.Persistence;

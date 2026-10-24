@@ -1,18 +1,14 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using Multitenant.Application.Abstractions;
 using Multitenant.Application.Abstractions.Identity;
 using Multitenant.Application.Abstractions.Tenancy;
-using Multitenant.Application.Configuration;
 using Multitenant.Application.Configuration.Auth;
 using Multitenant.Application.Configuration.Identity;
 using Multitenant.Application.Configuration.Jwt;
-using Multitenant.Application.Contracts;
 using Multitenant.Application.Contracts.Auth;
 using Multitenant.Application.Contracts.Results;
 using Multitenant.Application.Contracts.Users;
-using Multitenant.Application.Errors;
 using Multitenant.Application.Errors.Exceptions;
 using Multitenant.Domain.Entities;
 using Multitenant.Infrastructure.Persistence;
@@ -241,8 +237,9 @@ public sealed class AuthService(
 
     public async Task ConfirmEmailAsync(Guid userId, string token, CancellationToken cancellationToken)
     {
-        EnsureFeature(_identity.RequireConfirmedEmail);
-
+        // Confirmation is always allowed. The feature flag gates login, not the
+        // ability to confirm: emails are sent during onboarding/registration even
+        // when confirmation is optional, so the link must keep working.
         var user = await dbContext.Users
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(x => x.Id == userId, cancellationToken)
@@ -265,7 +262,12 @@ public sealed class AuthService(
         string email,
         CancellationToken cancellationToken)
     {
-        EnsureFeature(_identity.RequireConfirmedEmail);
+        // Nothing to resend when confirmation is optional: the endpoint still
+        // returns 202 so callers cannot probe which addresses exist.
+        if (!_identity.RequireConfirmedEmail)
+        {
+            return;
+        }
 
         var tenant = await FindTenantBySlugAsync(tenantSlug, cancellationToken);
         if (tenant is null || !tenant.IsActive)
