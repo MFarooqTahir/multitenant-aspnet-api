@@ -98,12 +98,17 @@ non-obvious decision is written down.
 
 - RFC 7807 `application/problem+json` for every error, with a stable `code`, `traceId` and
   `correlationId`.
-- FluentValidation with automatic validation problem responses.
+- FluentValidation with automatic validation problem responses; startup fails if any action
+  parameter has no registered validator, so validation cannot fail open.
 - Per-tenant and per-IP rate limiting with `Retry-After`.
 - `/health`, `/health/live`, `/health/ready`.
 - Versioned routes (`/api/v1/...`), OpenAPI document per version and a Scalar UI.
 - Serilog structured logging: readable locally, compact JSON in other environments,
-  optional Application Insights sink, correlation ids end to end.
+  optional Application Insights sink, correlation ids end to end (client values restricted to
+  a safe character whitelist).
+- Hardened defaults: explicit CORS headers/methods with credentials disabled, HTTPS
+  redirection, validated `Auth:PublicBaseUrl`, host-header allow-list, and token redaction in
+  development email logs.
 - Dockerfile, compose stack, `.env.example`, HTTP request collection and GitHub Actions CI
   that publishes to GHCR.
 
@@ -257,7 +262,9 @@ key reset rotates the security stamp, clients re-authenticate before calling
 `/auth/2fa/enable` with the first TOTP code. The integration test walks exactly this flow.
 
 Confirmation links always work, even with `Identity:RequireConfirmedEmail=false` (the flag
-gates login, not the ability to confirm); resend is a no-op `202` in that mode.
+gates login, not the ability to confirm); resend is a no-op `202` in that mode. The link places
+the token in the URL fragment, and the confirmation page submits it in a POST body
+(`{ "userId", "token" }`) so it is not captured by proxy logs or `Referer` headers.
 
 Email delivery is provider-based: `Logging` writes the message to the log; `Smtp` uses MailKit
 with the settings under `Email:Smtp`.
@@ -402,6 +409,7 @@ Configuration is standard ASP.NET Core: `appsettings.json`, then
 
 | Key | Default | Notes |
 | --- | --- | --- |
+| `AllowedHosts` | `localhost` | Host-header allow-list. Must be explicit outside Development; startup fails on `*` |
 | `ConnectionStrings:Postgres` | empty | Required at runtime. Npgsql connection string |
 | `ForwardedHeaders:Enabled` | `false` | Trust `X-Forwarded-For`/`X-Forwarded-Proto` from a proxy |
 | `ForwardedHeaders:ForwardLimit` | `1` | Number of proxies in front of the API |
@@ -413,7 +421,7 @@ Configuration is standard ASP.NET Core: `appsettings.json`, then
 | `Jwt:AccessTokenMinutes` | `15` | 1–120 |
 | `Auth:SingleSessionPerUser` | `true` | New login/refresh invalidates older sessions |
 | `Auth:RefreshTokenDays` | `30` | Refresh-token lifetime |
-| `Auth:PublicBaseUrl` | `http://localhost:8080` | Used to build confirmation links |
+| `Auth:PublicBaseUrl` | `http://localhost:8080` | Valid absolute URL used to build confirmation links; must be HTTPS in production |
 | `Auth:TwoFactorChallengeMinutes` | `5` | Lifetime of the 2FA challenge token |
 | `Identity:RequireConfirmedEmail` | `false` | Block login until email confirmed |
 | `Identity:EnableTwoFactor` | `false` | Expose and require TOTP |
@@ -422,7 +430,7 @@ Configuration is standard ASP.NET Core: `appsettings.json`, then
 | `Email:FromName` | `Multitenant API` | Sender name |
 | `Email:Smtp:Host` | empty | Required when provider is `Smtp` |
 | `Email:Smtp:Port` | `587` | |
-| `Email:Smtp:UseStartTls` | `true` | |
+| `Email:Smtp:UseStartTls` | `true` | When `false` the connection is unencrypted and a warning is logged |
 | `Email:Smtp:Username` / `Password` | empty | Optional SMTP auth |
 | `RateLimiting:Tenant:PermitLimit` | `120` | Requests per window per tenant |
 | `RateLimiting:Tenant:WindowSeconds` | `60` | |
@@ -431,14 +439,26 @@ Configuration is standard ASP.NET Core: `appsettings.json`, then
 | `Database:AutoMigrate` | `false` | Apply migrations on startup (dev/demo) |
 | `Database:SeedDemoData` | `false` | Seed roles + `acme`/`globex` |
 | `Demo:Password` | empty | Password for seeded demo users |
-| `Cors:AllowedOrigins` | `[]` | Empty disables CORS |
+| `Cors:AllowedOrigins` | `[]` | Empty disables CORS. When set, only standard headers/methods are allowed and credentials are disabled |
 | `Serilog:MinimumLevel:*` | `Information` | Standard Serilog overrides |
 | `Serilog:AzureMonitor:ConnectionString` | empty | When set, also logs to Application Insights |
 
-Development values live in `src/Multitenant.Api/appsettings.Development.json`; production
-values should come from environment variables or a secret store. `Jwt:SigningKey`,
+`appsettings.Development.json` is intentionally **not committed** (it is git-ignored). Create it
+locally for `dotnet run`, or supply the same values as environment variables. A minimal local
+Development configuration is:
+
+```json
+{
+  "ConnectionStrings": { "Postgres": "Host=localhost;Port=5432;Database=multitenantDb;Username=multitenant-DbUser;Password=change-me" },
+  "Jwt": { "SigningKey": "<32+ character random string>" },
+  "Demo": { "Password": "Demo123!Passw0rd" },
+  "Database": { "AutoMigrate": true, "SeedDemoData": true }
+}
+```
+
+Production values must come from environment variables or a secret store. `Jwt:SigningKey`,
 `ConnectionStrings:Postgres` and `Demo:Password` are intentionally empty in
-`appsettings.json`.
+`appsettings.json`; startup validation fails fast when required secrets are missing.
 
 ---
 
@@ -463,17 +483,16 @@ then listens on <http://localhost:8080>. Scalar is at <http://localhost:8080/sca
 
 ### Option B — local `dotnet run` with your own PostgreSQL
 
-1. Create a database and point the connection string at it. The default Development value is:
-
-   ```text
-   Host=localhost;Port=5432;Database=multitenantDb;Username=multitenant-DbUser;Password=multitenant-DbPassword123!
-   ```
-
-   You can override it without editing the file:
+1. Create a database and provide the connection string. If you created
+   `appsettings.Development.json` (see Configuration), its value is used; otherwise export the
+   required values:
 
    ```bash
    export ConnectionStrings__Postgres="Host=localhost;Port=5432;Database=multitenantDb;Username=postgres;Password=postgres"
    export Jwt__SigningKey="<32+ character random string>"
+   export Demo__Password="Demo123!Passw0rd"
+   export Database__AutoMigrate="true"
+   export Database__SeedDemoData="true"
    ```
 
 2. Run:
@@ -599,10 +618,15 @@ Production deployments should:
 
 - set `Database:AutoMigrate=false` and run migrations as a release step;
 - set `Database:SeedDemoData=false`;
+- set `AllowedHosts` to the explicit public host name(s) — startup fails on `*` outside Development;
 - provide `ConnectionStrings__Postgres` and `Jwt__SigningKey` from the platform secret store;
-- terminate TLS at the ingress/reverse proxy (the app serves plain HTTP on 8080);
+- set `Auth:PublicBaseUrl` to the public HTTPS URL used in confirmation links;
+- terminate TLS at the ingress/reverse proxy (the app serves plain HTTP on 8080 and redirects
+  to HTTPS, so `ForwardedHeaders` must carry the original scheme);
 - enable `ForwardedHeaders` and list the ingress proxies/networks so per-IP rate limiting
   and logs see the real client address;
+- configure a shared Data Protection key ring (Redis, Key Vault or a persistent volume) when
+  running more than one replica, so email-confirmation tokens validate across instances;
 - use the `Smtp` email provider (or add a provider-specific `IEmailSender`);
 - run at least two replicas behind a load balancer.
 

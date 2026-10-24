@@ -115,6 +115,7 @@ cross-platform.
 | Forwarded headers (proxy support) | `src/Multitenant.Api/Configuration/ForwardedHeadersSettings.cs` |
 | OpenAPI bearer scheme | `src/Multitenant.Api/OpenApi/BearerSecuritySchemeTransformer.cs` |
 | Error handling | `src/Multitenant.Api/Middleware/GlobalExceptionHandler.cs`, `ProblemDetailsStatusCodePages.cs` |
+| Startup validation (validators, hosts) | `src/Multitenant.Api/Program.cs`, `src/Multitenant.Api/Filters/ValidationFilterAssertion.cs` |
 | Rate limiting | `src/Multitenant.Api/RateLimiting/RateLimitingSetup.cs` |
 | Test harness | `tests/Multitenant.IntegrationTests/Infrastructure/IntegrationHarness.cs` |
 | Test scenarios/helpers | `tests/Multitenant.IntegrationTests/Infrastructure/Scenarios.cs` |
@@ -163,7 +164,18 @@ cross-platform.
 - **Health checks** are anonymous: `/health`, `/health/live`, `/health/ready`. They bypass
   rate limiting so probes never report false failures.
 - **Email confirmation** works even when `Identity:RequireConfirmedEmail=false`; resend is a
-  no-op `202` in that mode.
+  no-op `202` in that mode. The emailed link puts the token in the URL fragment and the page
+  POSTs `{ "userId", "token" }` to `/auth/confirm-email` (never a query string).
+- **Security hardening** lives in startup and middleware: `AllowedHosts` must be explicit
+  outside Development (startup throws on `*`), CORS allows only standard headers/methods with
+  credentials disabled, `UseHttpsRedirection` is enabled, client correlation ids are restricted
+  to `[A-Za-z0-9._-]`, confirmation tokens are redacted in `LoggingEmailSender`, and SMTP with
+  `UseStartTls=false` logs a plaintext warning.
+- **Validation is fail-closed.** `ValidationFilterAssertion` runs at startup and throws if any
+  complex action parameter lacks an `IValidator<T>`; add a validator when adding an endpoint.
+- **Provisioning and demo seeding are transactional.** `UserProvisioningService` joins a
+  caller's transaction when one exists (onboarding) and owns one otherwise; the initializer
+  wraps the whole demo tenant seed so a partial failure rolls back.
 - **OpenAPI** is versioned (`/openapi/v1.json`); Scalar is at `/scalar` and shows a bearer
   authentication panel from the declared scheme.
 
@@ -188,16 +200,23 @@ cross-platform.
 
 ## 8. Deployment notes
 
-- Container listens on `8080`, non-root, plain HTTP. Terminate TLS at the proxy/ingress.
+- Container listens on `8080`, non-root, plain HTTP. Terminate TLS at the proxy/ingress; the
+  app enables `UseHttpsRedirection`, so forwarded scheme headers must be configured.
 - Production configuration:
   - `Database:AutoMigrate=false`, `Database:SeedDemoData=false`
+  - `AllowedHosts` set to the explicit public host name(s); startup fails on `*` outside Development
   - `ConnectionStrings__Postgres`, `Jwt__SigningKey` (32+ chars) from a secret store
+  - `Auth:PublicBaseUrl` set to the public HTTPS URL used in confirmation links
   - `Email:Provider=Smtp` (or implement another `IEmailSender`)
   - optionally `Serilog:AzureMonitor:ConnectionString` for App Insights
+- Configure a shared Data Protection key ring (Redis, Key Vault or a persistent volume) when
+  running more than one replica, or confirmation tokens minted by one instance will not
+  validate on another.
 - Run migrations as an explicit release step.
 - The image is published to `ghcr.io/<owner>/<repo>` on `main`/tags. Tag `v1.0.0` produces
   container tags `1.0.0` and `1.0`.
-- Multi-replica caveat: rate limiter state is per process.
+- Multi-replica caveat: rate limiter state is per process, and Data Protection keys are local
+  unless a shared ring is configured.
 
 ---
 
@@ -226,8 +245,11 @@ cross-platform.
 
   CI publishes `ghcr.io/<owner>/<repo>:1.0.0` and `:1.0`.
 
-- Do not commit `.env`, `appsettings.*.local.json`, tokens or passwords. The committed
-  `appsettings.Development.json` contains only local demo values.
+- Do not commit `.env`, `appsettings*.json` (other than `appsettings.json`), tokens or
+  passwords. `appsettings.Development.json` is intentionally git-ignored; create it locally
+  (see README `Configuration`) or pass the values as environment variables. The previously
+  committed development secrets were removed from git tracking — rotate any value that was
+  ever pushed.
 
 ---
 
@@ -237,6 +259,10 @@ cross-platform.
 2. `dotnet build multitenant-aspnet-api.slnx` — expect 0 warnings.
 3. `dotnet test tests/Multitenant.UnitTests` — expect 32 passing.
 4. Start Docker, then `dotnet test tests/Multitenant.IntegrationTests` — expect 50 passing.
-5. `docker compose up --build`, open <http://localhost:8080/scalar>, log in as
-   `owner@acme.test` / `Demo123!Passw0rd`.
+5. `cp .env.example .env` and adjust `JWT_SIGNING_KEY`/passwords, then
+   `docker compose up --build`, open <http://localhost:8080/scalar>, log in as
+   `owner@acme.test` / `Demo123!Passw0rd`. To run with `dotnet run` instead, first create the
+   git-ignored `src/Multitenant.Api/appsettings.Development.json` (see README `Configuration`)
+   or export the equivalent `ConnectionStrings__Postgres`, `Jwt__SigningKey`,
+   `Demo__Password`, `Database__AutoMigrate` and `Database__SeedDemoData` variables.
 6. Skim `docs/architecture.md` and the ADRs before changing tenant or auth behaviour.
