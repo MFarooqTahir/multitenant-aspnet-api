@@ -59,10 +59,9 @@ public static class JwtBearerConfiguration
     private static async Task ValidateLiveUserAsync(TokenValidatedContext context)
     {
         var principal = context.Principal;
-        var identity = principal?.Identity as ClaimsIdentity;
 
-        if (identity is null
-            || !Guid.TryParse(principal!.FindFirst(AuthClaims.Subject)?.Value, out var userId)
+        if (principal?.Identity is not ClaimsIdentity 
+            || !Guid.TryParse(principal.FindFirst(AuthClaims.Subject)?.Value, out var userId)
             || !Guid.TryParse(principal.FindFirst(AuthClaims.TenantId)?.Value, out var tenantId))
         {
             context.Fail("The access token is missing required claims.");
@@ -137,11 +136,13 @@ public static class JwtBearerConfiguration
                 : "https://datatracker.ietf.org/doc/html/rfc9110#section-15.5.2",
             Detail = detail,
             Instance = httpContext.Request.Path,
+            Extensions =
+            {
+                ["code"] = code,
+                ["traceId"] = httpContext.TraceIdentifier,
+                ["correlationId"] = httpContext.Items[CorrelationKeys.ItemKey]
+            }
         };
-
-        problem.Extensions["code"] = code;
-        problem.Extensions["traceId"] = httpContext.TraceIdentifier;
-        problem.Extensions["correlationId"] = httpContext.Items[CorrelationKeys.ItemKey];
 
         await httpContext.Response.WriteAsJsonAsync(
             problem,

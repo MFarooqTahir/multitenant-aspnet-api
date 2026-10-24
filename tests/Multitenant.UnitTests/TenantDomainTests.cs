@@ -16,12 +16,12 @@ public sealed class TenantDomainTests
         [InlineData("-acme", false)]
         [InlineData("acme-", false)]
         public void ValidatesSlugs(string slug, bool expected) =>
-            Assert.Equal(expected, Domain.Entities.TenantSlug.IsValid(slug));
+            Assert.Equal(expected, TenantSlug.IsValid(slug));
 
         [Fact]
         public void NormalizesToLowercaseWithoutWhitespace()
         {
-            Assert.Equal("acme", Domain.Entities.TenantSlug.Normalize("  AcMe "));
+            Assert.Equal("acme", TenantSlug.Normalize("  AcMe "));
         }
     }
 
@@ -81,7 +81,7 @@ public sealed class PaginationAndSortingTests
         Assert.Equal(1, page);
         Assert.Equal(20, size);
 
-        var (capped, max) = Pagination.Normalize(1, 500);
+        var (_, max) = Pagination.Normalize(1, 500);
         Assert.Equal(100, max);
     }
 
@@ -116,7 +116,7 @@ public sealed class UserNameTests
     [Fact]
     public void NamespacesUserNamesByTenantSlug()
     {
-        var name = Multitenant.Application.Common.UserNames.For("Acme", "Owner@Acme.com");
+        var name = UserNames.For("Acme", "Owner@Acme.com");
         Assert.Equal("acme:owner@acme.com", name);
     }
 }

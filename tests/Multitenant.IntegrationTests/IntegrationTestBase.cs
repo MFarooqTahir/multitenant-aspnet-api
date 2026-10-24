@@ -14,10 +14,6 @@ public abstract class IntegrationTestBase : IAsyncLifetime
 
     public Task DisposeAsync() => Harness.DisposeAsync();
 
-    protected static IntegrationHarness Harness => _harness;
-
-    private static readonly IntegrationHarness _harness = new();
-
     public static JsonSerializerOptions JsonOptions { get; } = new(JsonSerializerDefaults.Web);
 
     protected static HttpClient CreateClient() => IntegrationHarness.DefaultFactory.CreateClient();
@@ -47,7 +43,8 @@ public abstract class IntegrationTestBase : IAsyncLifetime
         object? body = null,
         string? bearer = null)
     {
-        using var request = new HttpRequestMessage(method, path) { Content = body is null ? null : JsonContent(body) };
+        using var request = new HttpRequestMessage(method, path);
+        request.Content = body is null ? null : JsonContent(body);
 
         if (bearer is not null)
         {

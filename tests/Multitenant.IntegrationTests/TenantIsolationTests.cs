@@ -1,6 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
-using System.Text.Json;
+using System.Net.Http.Json;
 using Multitenant.Application.Contracts;
 using Multitenant.Domain.Entities;
 using Multitenant.IntegrationTests.Infrastructure;
@@ -94,7 +94,7 @@ public sealed class TenantIsolationTests : IntegrationTestBase
             new OnboardTenantRequest(slug, name, ownerEmail, "Owner", DemoPassword));
 
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<TenantResponse>(JsonOptions))
+        return await response.Content.ReadFromJsonAsync<TenantResponse>(JsonOptions)
             ?? throw new InvalidOperationException("Onboarding response was empty.");
     }
 
@@ -102,7 +102,7 @@ public sealed class TenantIsolationTests : IntegrationTestBase
     {
         var response = await PostAsync(client, "/api/v1/auth/login", new LoginRequest(slug, email, password));
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<AuthTokens>(JsonOptions))
+        return await response.Content.ReadFromJsonAsync<AuthTokens>(JsonOptions)
             ?? throw new InvalidOperationException("Login response was empty.");
     }
 
@@ -111,15 +111,13 @@ public sealed class TenantIsolationTests : IntegrationTestBase
         string accessToken,
         string name)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/projects")
-        {
-            Content = JsonContent(new CreateProjectRequest(name, null, ProjectStatus.Active)),
-        };
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/projects");
+        request.Content = JsonContent(new CreateProjectRequest(name, null));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
         var response = await client.SendAsync(request);
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<ProjectResponse>(JsonOptions))
+        return await response.Content.ReadFromJsonAsync<ProjectResponse>(JsonOptions)
             ?? throw new InvalidOperationException("Project response was empty.");
     }
 
@@ -129,22 +127,16 @@ public sealed class TenantIsolationTests : IntegrationTestBase
         Guid projectId,
         string title)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/projects/{projectId}/tasks")
-        {
-            Content = JsonContent(
-                new CreateTaskRequest(
-                    title,
-                    null,
-                    WorkItemStatus.Todo,
-                    WorkItemPriority.Medium,
-                    null,
-                    null)),
-        };
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/projects/{projectId}/tasks");
+        request.Content = JsonContent(
+            new CreateTaskRequest(
+                title,
+                null));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
         var response = await client.SendAsync(request);
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<TaskResponse>(JsonOptions))
+        return await response.Content.ReadFromJsonAsync<TaskResponse>(JsonOptions)
             ?? throw new InvalidOperationException("Task response was empty.");
     }
 
@@ -154,15 +146,13 @@ public sealed class TenantIsolationTests : IntegrationTestBase
         string email,
         string role)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/users")
-        {
-            Content = JsonContent(new CreateUserRequest(email, "Iso Member", DemoPassword, role)),
-        };
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/users");
+        request.Content = JsonContent(new CreateUserRequest(email, "Iso Member", DemoPassword, role));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
         var response = await client.SendAsync(request);
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<UserResponse>(JsonOptions))
+        return await response.Content.ReadFromJsonAsync<UserResponse>(JsonOptions)
             ?? throw new InvalidOperationException("User response was empty.");
     }
 
@@ -173,7 +163,7 @@ public sealed class TenantIsolationTests : IntegrationTestBase
 
         var response = await client.SendAsync(request);
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<PagedResult<UserResponse>>(JsonOptions))
+        return await response.Content.ReadFromJsonAsync<PagedResult<UserResponse>>(JsonOptions)
             ?? throw new InvalidOperationException("User list response was empty.");
     }
 }

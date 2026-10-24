@@ -93,11 +93,13 @@ public static class RateLimitingSetup
             Type = "https://datatracker.ietf.org/doc/html/rfc6585#section-4",
             Detail = "The rate limit for this tenant or IP address has been exceeded. Retry later.",
             Instance = context.HttpContext.Request.Path,
+            Extensions =
+            {
+                ["code"] = "rate_limited",
+                ["traceId"] = context.HttpContext.TraceIdentifier,
+                ["correlationId"] = context.HttpContext.Items[CorrelationKeys.ItemKey]
+            }
         };
-
-        problem.Extensions["code"] = "rate_limited";
-        problem.Extensions["traceId"] = context.HttpContext.TraceIdentifier;
-        problem.Extensions["correlationId"] = context.HttpContext.Items[CorrelationKeys.ItemKey];
 
         await response.WriteAsJsonAsync(
             problem,

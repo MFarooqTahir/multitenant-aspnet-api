@@ -33,7 +33,7 @@ public sealed class JwtTokenGeneratorTests
     [Fact]
     public void AccessTokenCarriesTenantAndRoleClaims()
     {
-        var (generator, handler) = Create();
+        var (generator, _) = Create();
         var user = new AppUser
         {
             Id = Guid.NewGuid(),
@@ -62,7 +62,7 @@ public sealed class JwtTokenGeneratorTests
             ClockSkew = TimeSpan.FromSeconds(30),
             NameClaimType = "sub",
             RoleClaimType = "role",
-        }, out var token);
+        }, out _);
 
         Assert.Equal(user.Id, Guid.Parse(principal.FindFirst("sub")!.Value));
         Assert.Equal(user.TenantId, Guid.Parse(principal.FindFirst("tenant_id")!.Value));
@@ -73,7 +73,7 @@ public sealed class JwtTokenGeneratorTests
     [Fact]
     public void TwoFactorChallengeCarriesTenantAndPurpose()
     {
-        var (generator, handler) = Create();
+        var (generator, _) = Create();
         var user = new AppUser
         {
             Id = Guid.NewGuid(),
