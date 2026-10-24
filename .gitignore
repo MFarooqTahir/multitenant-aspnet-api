@@ -34,6 +34,10 @@ _ReSharper*/
 .env.*
 !.env.example
 appsettings.*.local.json
+appsettings.*.json
+appsettings.Development.json
+src/*/appsettings.*.json
+src/*/appsettings.Development.json
 secrets.json
 *.pfx
 *.snk
