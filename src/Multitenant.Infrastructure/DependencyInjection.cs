@@ -26,17 +26,20 @@ public static class DependencyInjection
 
         AddOptions(services, configuration);
 
-        var connectionString = configuration.GetConnectionString("Postgres");
-        if (string.IsNullOrWhiteSpace(connectionString))
-        {
-            throw new InvalidOperationException(
-                "ConnectionStrings:Postgres is not configured. Set it in appsettings.json, user secrets or the ConnectionStrings__Postgres environment variable.");
-        }
-
         services.AddScoped<TenantAuditingInterceptor>();
         services.AddDbContext<AppDbContext>((provider, options) =>
         {
-            options.UseNpgsql(connectionString, npgsql =>
+            // Resolved lazily so configuration sources added later (tests, secrets,
+            // environment-specific files) are honoured.
+            var resolvedConnectionString = provider.GetRequiredService<IConfiguration>().GetConnectionString("Postgres");
+
+            if (string.IsNullOrWhiteSpace(resolvedConnectionString))
+            {
+                throw new InvalidOperationException(
+                    "ConnectionStrings:Postgres is not configured. Set it in appsettings.json, user secrets or the ConnectionStrings__Postgres environment variable.");
+            }
+
+            options.UseNpgsql(resolvedConnectionString, npgsql =>
             {
                 npgsql.MigrationsAssembly(typeof(AppDbContext).Assembly.FullName);
                 npgsql.MigrationsHistoryTable("__EFMigrationsHistory");

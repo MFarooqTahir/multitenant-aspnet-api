@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Options;
 using Multitenant.Application.Common;
 using Multitenant.Application.Configuration;
 
@@ -12,46 +13,46 @@ namespace Multitenant.Api.RateLimiting;
 /// <list type="bullet">
 /// <item><c>tenant</c> (global) — 120 requests/minute per tenant, falling back to the
 /// client IP for anonymous traffic.</item>
-/// <item><c>auth</c> — 10 requests/minute per IP, applied to login/refresh/onboarding.</item>
+/// <item><c>auth</c> — 10 requests/minute per IP, applied to login/refresh/registration/onboarding.</item>
 /// </list>
 /// Partitioning by <c>tenant_id</c> keeps one noisy tenant from exhausting another's
-/// budget, which is the isolation property that matters for a SaaS API.
+/// budget, which is the isolation property that matters for a SaaS API. Options are
+/// resolved per request so configuration overrides (for example in tests) are honoured.
 /// </summary>
 public static class RateLimitingSetup
 {
     public const string TenantPolicy = "tenant";
     public const string AuthPolicy = "auth";
 
-    public static IServiceCollection AddApiRateLimiting(
-        this IServiceCollection services,
-        IConfiguration configuration)
+    public static IServiceCollection AddApiRateLimiting(this IServiceCollection services)
     {
-        var options = configuration.GetSection(RateLimitingOptions.SectionName).Get<RateLimitingOptions>()
-            ?? new RateLimitingOptions();
-
         services.AddRateLimiter(limiter =>
         {
             limiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
             limiter.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
                 RateLimitPartition.GetFixedWindowLimiter(
                     TenantPartitionKey(context),
-                    _ => Window(options.Tenant)));
+                    _ => Window(PolicyOptions(context).Tenant)));
 
             limiter.AddPolicy(TenantPolicy, context =>
                 RateLimitPartition.GetFixedWindowLimiter(
                     TenantPartitionKey(context),
-                    _ => Window(options.Tenant)));
+                    _ => Window(PolicyOptions(context).Tenant)));
 
             limiter.AddPolicy(AuthPolicy, context =>
                 RateLimitPartition.GetFixedWindowLimiter(
                     $"ip:{ClientIp(context)}",
-                    _ => Window(options.Auth)));
+                    _ => Window(PolicyOptions(context).Auth)));
 
             limiter.OnRejected = WriteRejectionAsync;
         });
 
         return services;
     }
+
+    private static RateLimitingOptions PolicyOptions(HttpContext context) =>
+        context.RequestServices.GetRequiredService<IOptions<RateLimitingOptions>>().Value;
 
     private static FixedWindowRateLimiterOptions Window(RateLimitPolicyOptions policy) => new()
     {
@@ -93,13 +94,11 @@ public static class RateLimitingSetup
             Type = "https://datatracker.ietf.org/doc/html/rfc6585#section-4",
             Detail = "The rate limit for this tenant or IP address has been exceeded. Retry later.",
             Instance = context.HttpContext.Request.Path,
-            Extensions =
-            {
-                ["code"] = "rate_limited",
-                ["traceId"] = context.HttpContext.TraceIdentifier,
-                ["correlationId"] = context.HttpContext.Items[CorrelationKeys.ItemKey]
-            }
         };
+
+        problem.Extensions["code"] = "rate_limited";
+        problem.Extensions["traceId"] = context.HttpContext.TraceIdentifier;
+        problem.Extensions["correlationId"] = context.HttpContext.Items[CorrelationKeys.ItemKey];
 
         await response.WriteAsJsonAsync(
             problem,

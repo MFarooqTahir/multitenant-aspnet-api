@@ -36,6 +36,23 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
         };
     }
 
+    /// <summary>
+    /// Self-service registration into an existing tenant. New users always start as
+    /// <c>Member</c>; an Owner or Admin promotes them through the users endpoints.
+    /// </summary>
+    [HttpPost("register")]
+    [AllowAnonymous]
+    [EnableRateLimiting(RateLimitingSetup.AuthPolicy)]
+    [ProducesResponseType<UserResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<UserResponse>> Register(
+        RegisterRequest request,
+        CancellationToken cancellationToken) =>
+        StatusCode(
+            StatusCodes.Status201Created,
+            await authService.RegisterAsync(request, cancellationToken));
+
     /// <summary>Exchanges a refresh token for a new token pair (rotation + reuse detection).</summary>
     [HttpPost("refresh")]
     [AllowAnonymous]

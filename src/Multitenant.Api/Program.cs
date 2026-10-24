@@ -90,7 +90,7 @@ builder.Services
 
 builder.Services.AddAuthorization(Policies.Configure);
 
-builder.Services.AddApiRateLimiting(builder.Configuration);
+builder.Services.AddApiRateLimiting();
 
 builder.Services.AddHealthChecks()
     .AddCheck("self", () => Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy(), ["live"])
@@ -109,6 +109,7 @@ var app = builder.Build();
 
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseExceptionHandler();
+app.UseProblemDetailsStatusCodePages();
 app.UseSerilogRequestLogging();
 
 if (!app.Environment.IsDevelopment())
@@ -149,6 +150,3 @@ await using (var scope = app.Services.CreateAsyncScope())
 }
 
 await app.RunAsync();
-
-/// <summary>Exposed so integration tests can use <c>WebApplicationFactory&lt;Program&gt;</c>.</summary>
-public partial class Program;

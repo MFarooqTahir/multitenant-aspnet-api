@@ -65,6 +65,8 @@ public sealed record TenantResponse(
 
 public sealed record LoginRequest(string TenantSlug, string Email, string Password);
 
+public sealed record RegisterRequest(string TenantSlug, string Email, string DisplayName, string Password);
+
 public sealed record RefreshTokenRequest(string RefreshToken);
 
 public sealed record LogoutRequest(string RefreshToken);
