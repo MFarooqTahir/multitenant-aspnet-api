@@ -5,15 +5,13 @@ using Multitenant.Application.Errors;
 
 namespace Multitenant.Infrastructure.Identity;
 
+/// <summary>
+/// Reads the caller's identity from the validated JWT. Tenant identity is exposed
+/// through <see cref="ITenantContext"/>, not here, so there is one place to look.
+/// </summary>
 public sealed class CurrentUser(IHttpContextAccessor httpContextAccessor) : ICurrentUser
 {
-    public bool IsAuthenticated => httpContextAccessor.HttpContext?.User.Identity?.IsAuthenticated is true;
-
     public Guid UserId => Guid.TryParse(Claim(AuthClaims.Subject), out var id)
-        ? id
-        : throw new UnauthorizedException();
-
-    public Guid TenantId => Guid.TryParse(Claim(AuthClaims.TenantId), out var id)
         ? id
         : throw new UnauthorizedException();
 

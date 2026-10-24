@@ -1,11 +1,11 @@
 using Microsoft.AspNetCore.Mvc;
-using Multitenant.Application.Common;
+using Multitenant.Api.ErrorHandling;
 
 namespace Multitenant.Api.Middleware;
 
 /// <summary>
-/// Turns framework-generated 401/403/404/405 responses (which have no body) into
-/// RFC 7807 problem+json, so every error the API returns has the same shape.
+/// Gives framework-generated 401/403/404/405 responses (which have no body) the
+/// same problem+json shape as application errors.
 /// </summary>
 public static class ProblemDetailsStatusCodePagesExtensions
 {
@@ -20,47 +20,11 @@ public static class ProblemDetailsStatusCodePagesExtensions
                 return;
             }
 
-            var statusCode = response.StatusCode;
-            var (title, type, code) = statusCode switch
-            {
-                StatusCodes.Status401Unauthorized => (
-                    "Unauthorized",
-                    "https://datatracker.ietf.org/doc/html/rfc9110#section-15.5.2",
-                    "unauthorized"),
-                StatusCodes.Status403Forbidden => (
-                    "Forbidden",
-                    "https://datatracker.ietf.org/doc/html/rfc9110#section-15.5.4",
-                    "forbidden"),
-                StatusCodes.Status404NotFound => (
-                    "Not Found",
-                    "https://datatracker.ietf.org/doc/html/rfc9110#section-15.5.5",
-                    "not_found"),
-                StatusCodes.Status405MethodNotAllowed => (
-                    "Method Not Allowed",
-                    "https://datatracker.ietf.org/doc/html/rfc9110#section-15.5.6",
-                    "method_not_allowed"),
-                _ => (string.Empty, string.Empty, string.Empty),
-            };
-
-            if (string.IsNullOrEmpty(code))
+            var problem = ApiProblemDetails.CreateForStatus(httpContext, response.StatusCode);
+            if (problem is null)
             {
                 return;
             }
-
-            var problem = new ProblemDetails
-            {
-                Status = statusCode,
-                Title = title,
-                Type = type,
-                Detail = title,
-                Instance = httpContext.Request.Path,
-                Extensions =
-                {
-                    ["code"] = code,
-                    ["traceId"] = httpContext.TraceIdentifier,
-                    ["correlationId"] = httpContext.Items[CorrelationKeys.ItemKey],
-                },
-            };
 
             response.ContentType = "application/problem+json";
             await response.WriteAsJsonAsync(

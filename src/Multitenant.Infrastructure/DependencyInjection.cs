@@ -82,13 +82,14 @@ public static class DependencyInjection
             .Configure<IOptions<JwtOptions>>((options, jwt) => JwtBearerConfiguration.Configure(options, jwt.Value));
 
         services.AddScoped<ITenantContext, TenantContext>();
-        services.AddScoped<ITenantStore, TenantStore>();
         services.AddScoped<ICurrentUser, CurrentUser>();
         services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
         services.AddScoped<RefreshTokenManager>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<ITenantService, TenantService>();
         services.AddScoped<IUserService, UserService>();
+        services.AddScoped<IUserProvisioningService, UserProvisioningService>();
+        services.AddScoped<IUserProvisioningService, UserProvisioningService>();
         services.AddScoped<IProjectService, ProjectService>();
         services.AddScoped<ITaskService, TaskService>();
         services.AddScoped<IAccountEmailService, AccountEmailService>();

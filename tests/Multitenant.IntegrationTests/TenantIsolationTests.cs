@@ -10,8 +10,6 @@ public sealed class TenantIsolationTests : IntegrationTestBase
 {
     public TenantIsolationTests(IntegrationHarness harness) => Harness = harness;
 
-    private const string Password = "Password1!aaaa";
-
     [Fact]
     public async Task CrossTenantProjectAccessReturns404()
     {
@@ -19,10 +17,10 @@ public sealed class TenantIsolationTests : IntegrationTestBase
 
         var alpha = await OnboardAsync(client, "iso-a", "Iso Alpha", "isoalpha@acme.test");
         var beta = await OnboardAsync(client, "iso-b", "Iso Beta", "isobeta@acme.test");
-        var alphaTokens = await LoginAsync(client, alpha.Slug, alpha.OwnerEmail);
-        var betaTokens = await LoginAsync(client, beta.Slug, beta.OwnerEmail);
+        var alphaTokens = await Scenarios.LoginAsync(client, alpha.Slug, alpha.OwnerEmail);
+        var betaTokens = await Scenarios.LoginAsync(client, beta.Slug, beta.OwnerEmail);
 
-        var project = await CreateProjectAsync(client, alphaTokens.AccessToken, "Alpha Rocket");
+        var project = await Scenarios.CreateProjectAsync(client, alphaTokens.AccessToken, "Alpha Rocket");
 
         var ownResponse = await client.GetApi($"/api/v1/projects/{project.Id}", alphaTokens.AccessToken);
         Assert.Equal(HttpStatusCode.OK, ownResponse.StatusCode);
@@ -44,10 +42,10 @@ public sealed class TenantIsolationTests : IntegrationTestBase
 
         var alpha = await OnboardAsync(client, "iso-e", "Iso Epsilon", "isoepsilon@acme.test");
         var beta = await OnboardAsync(client, "iso-g", "Iso Eta", "isoeta@acme.test");
-        var alphaTokens = await LoginAsync(client, alpha.Slug, alpha.OwnerEmail);
-        var betaTokens = await LoginAsync(client, beta.Slug, beta.OwnerEmail);
+        var alphaTokens = await Scenarios.LoginAsync(client, alpha.Slug, alpha.OwnerEmail);
+        var betaTokens = await Scenarios.LoginAsync(client, beta.Slug, beta.OwnerEmail);
 
-        var project = await CreateProjectAsync(client, alphaTokens.AccessToken, "Epsilon Rocket");
+        var project = await Scenarios.CreateProjectAsync(client, alphaTokens.AccessToken, "Epsilon Rocket");
         var task = await CreateTaskAsync(client, alphaTokens.AccessToken, project.Id, "Launch epsilon");
 
         var ownResponse = await client.GetApi($"/api/v1/tasks/{task.Id}", alphaTokens.AccessToken);
@@ -67,10 +65,10 @@ public sealed class TenantIsolationTests : IntegrationTestBase
 
         var alpha = await OnboardAsync(client, "iso-h", "Iso Theta", "isotheta@acme.test");
         var beta = await OnboardAsync(client, "iso-i", "Iso Iota", "isoiota@acme.test");
-        var alphaTokens = await LoginAsync(client, alpha.Slug, alpha.OwnerEmail);
-        var betaTokens = await LoginAsync(client, beta.Slug, beta.OwnerEmail);
+        var alphaTokens = await Scenarios.LoginAsync(client, alpha.Slug, alpha.OwnerEmail);
+        var betaTokens = await Scenarios.LoginAsync(client, beta.Slug, beta.OwnerEmail);
 
-        var project = await CreateProjectAsync(client, alphaTokens.AccessToken, "Theta Rocket");
+        var project = await Scenarios.CreateProjectAsync(client, alphaTokens.AccessToken, "Theta Rocket");
         var betaUser = await CreateUserAsync(client, betaTokens.AccessToken, "theta-outsider@acme.test");
 
         var response = await client.PostApi(
@@ -93,7 +91,7 @@ public sealed class TenantIsolationTests : IntegrationTestBase
         using var client = CreateClient();
 
         var tenant = await OnboardAsync(client, "iso-f", "Iso Zeta", "isozeta@acme.test");
-        var tokens = await LoginAsync(client, tenant.Slug, tenant.OwnerEmail);
+        var tokens = await Scenarios.LoginAsync(client, tenant.Slug, tenant.OwnerEmail);
 
         var created = await CreateUserAsync(client, tokens.AccessToken, "iso-zeta-member@acme.test");
         var list = await ListUsersAsync(client, tokens.AccessToken);
@@ -108,34 +106,8 @@ public sealed class TenantIsolationTests : IntegrationTestBase
         string name,
         string ownerEmail)
     {
-        var response = await client.PostApi(
-            "/api/v1/tenants/onboard",
-            new OnboardTenantRequest(slug, name, ownerEmail, "Owner", Password));
-
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        var tenant = await response.ReadAsync<TenantResponse>();
+        var tenant = await Scenarios.OnboardAsync(client, slug, name, ownerEmail);
         return new OnboardedTenant(tenant.Slug, ownerEmail);
-    }
-
-    private static async Task<AuthTokens> LoginAsync(HttpClient client, string slug, string email)
-    {
-        var response = await client.PostApi("/api/v1/auth/login", new LoginRequest(slug, email, Password));
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        return await response.ReadAsync<AuthTokens>();
-    }
-
-    private static async Task<ProjectResponse> CreateProjectAsync(
-        HttpClient client,
-        string accessToken,
-        string name)
-    {
-        var response = await client.PostApi(
-            "/api/v1/projects",
-            new CreateProjectRequest(name, null, ProjectStatus.Active),
-            accessToken);
-
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        return await response.ReadAsync<ProjectResponse>();
     }
 
     private static async Task<TaskResponse> CreateTaskAsync(
@@ -160,19 +132,19 @@ public sealed class TenantIsolationTests : IntegrationTestBase
     {
         var response = await client.PostApi(
             "/api/v1/users",
-            new CreateUserRequest(email, "Iso Member", Password, TenantRoles.Member),
+            new CreateUserRequest(email, "Iso Member", Scenarios.Password, TenantRoles.Member),
             accessToken);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return await response.ReadAsync<UserResponse>();
     }
 
-    private static async Task<PagedResult<UserResponse>> ListUsersAsync(HttpClient client, string accessToken)
+    private static async Task<PagedResult<UserResponse>> ListUsersAsync(
+        HttpClient client,
+        string accessToken)
     {
         var response = await client.GetApi("/api/v1/users", accessToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return await response.ReadAsync<PagedResult<UserResponse>>();
     }
-
-    private sealed record OnboardedTenant(string Slug, string OwnerEmail);
 }

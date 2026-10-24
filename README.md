@@ -157,6 +157,32 @@ no tenant context yet or where a tenant-scoped lookup must bypass the filter (lo
 security-stamp validation, seeding). Each one is paired with an explicit `TenantId`
 predicate.
 
+### Why `ITenantContext` when the `DbContext` is already injected?
+
+They answer different questions, so neither replaces the other:
+
+- **`AppDbContext`** is how a service reads and writes data. It knows *what* a query is, not
+  *who* is asking.
+- **`ITenantContext`** is request-scoped ambient state: *which tenant this request belongs
+  to*. It holds no data-access code.
+
+Two cross-cutting components need the tenant **without every caller passing it down**:
+
+1. The EF Core global query filters, which append `TenantId = ...` to tenant-owned queries.
+2. The `SaveChanges` interceptor, which stamps `TenantId` on inserts and rejects writes that
+   target another tenant.
+
+Passing a `tenantId` argument into every repository method would work, but it is easy to
+forget on a new query and impossible to enforce centrally. Setting it once per request (in
+JWT validation, or explicitly in anonymous flows) means a forgotten parameter cannot leak
+data. `AppDbContext` therefore depends on `ITenantContext`, and the filter reads
+`AppDbContext.CurrentTenantId` (a `DbContext` member, not a captured service) so EF's model
+cache works correctly.
+
+The rule of thumb: **`ITenantContext` is for infrastructure that cannot be handed the tenant
+explicitly; services still use `AppDbContext` for all tenant data.** There is no separate
+tenant "repository" abstraction — that would be a second way to do the same query.
+
 ---
 
 ## Authentication and authorization
@@ -253,6 +279,11 @@ There are three supported paths:
 
    The user is created as `Member`, receives a confirmation email (logged in development),
    and can log in immediately unless `Identity:RequireConfirmedEmail` is on.
+
+   Internally this path and the admin path below call the same
+   `IUserProvisioningService`, so email-uniqueness checks, Identity creation, role
+   assignment and response mapping exist in one place. Only the authorization decision and
+   the chosen role differ.
 
 2. **An Owner or Admin creates a user** (authenticated). This is the path for Admins and
    Owners, and it lets the caller choose the role:
@@ -630,13 +661,38 @@ fields @timestamp, @message
 │   └── adr/                           architecture decision records
 ├── src/
 │   ├── Multitenant.Api/               controllers, middleware, filters, rate limiting, Program
-│   ├── Multitenant.Application/       contracts, abstractions, validators, options
-│   ├── Multitenant.Domain/            entities and invariants
-│   └── Multitenant.Infrastructure/    EF Core, Identity, JWT, email, services, migrations
+│   ├── Multitenant.Application/
+│   │   ├── Abstractions/              one interface per file
+│   │   │   ├── Identity/              auth, JWT, current user, account email
+│   │   │   ├── Messaging/             IEmailSender + EmailMessage
+│   │   │   └── Tenancy/               tenant context + tenant/user/project/task services
+│   │   ├── Common/                    paging, sorting, password policy, claim names
+│   │   ├── Configuration/             one options class per file, grouped by section
+│   │   ├── Contracts/                 one DTO per file, grouped by feature
+│   │   ├── Errors/                    AppException + one file per exception
+│   │   └── Validation/                one validator per file, grouped by feature
+│   ├── Multitenant.Domain/            entities and invariants (one type per file)
+│   └── Multitenant.Infrastructure/
+│       ├── Email/                     logging + SMTP senders
+│       ├── Identity/                  AuthService, token manager, provisioning, JWT setup
+│       ├── Persistence/               DbContext, interceptor, initializer, migrations
+│       ├── Services/                  tenant, user, project and task services
+│       └── Tenancy/                   TenantContext
 └── tests/
     ├── Multitenant.UnitTests/         fast domain/unit coverage
     └── Multitenant.IntegrationTests/  WebApplicationFactory + Testcontainers
 ```
+
+**Conventions**
+
+- One public type per file, named after the type.
+- Folders describe a feature or concern; namespaces stay cohesive per layer
+  (`Multitenant.Application.Contracts` covers all contract folders, for example), so a
+  consumer needs one `using` per layer.
+- Interfaces live in `Application/Abstractions`; implementations live in `Infrastructure`.
+  `Multitenant.Api` contains no business logic.
+- There is one way to do each thing: one tenant context, one user-creation path, one
+  problem-details factory, one password policy and one tenant-slug rule.
 
 Migrations live in `src/Multitenant.Infrastructure/Persistence/Migrations`.
 

@@ -2,10 +2,17 @@ using System.Text.RegularExpressions;
 
 namespace Multitenant.Domain.Entities;
 
+/// <summary>
+/// Tenant slug rules. A slug is the human-facing key used at login and onboarding,
+/// so it is normalized (trim + lowercase) before validation and storage.
+/// </summary>
 public static partial class TenantSlug
 {
     public const int MinLength = 3;
     public const int MaxLength = 40;
+
+    public const string Description =
+        "Slug must be 3-40 characters, use lowercase letters, digits and single hyphens, and start and end with a letter or digit.";
 
     public static string Normalize(string? slug) => slug?.Trim().ToLowerInvariant() ?? string.Empty;
 
@@ -22,8 +29,7 @@ public static partial class TenantSlug
     {
         if (!IsValid(slug))
         {
-            throw new DomainException(
-                $"Tenant slug must be {MinLength}-{MaxLength} characters, contain only lowercase letters, digits and single hyphens, and start and end with a letter or digit.");
+            throw new DomainException(Description);
         }
     }
 

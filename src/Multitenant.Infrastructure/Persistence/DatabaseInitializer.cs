@@ -17,7 +17,6 @@ public sealed partial class DatabaseInitializer(
     RoleManager<AppRole> roleManager,
     UserManager<AppUser> userManager,
     ITenantContext tenantContext,
-    ITenantStore tenantStore,
     IOptions<DatabaseOptions> databaseOptions,
     IOptions<DemoOptions> demoOptions,
     TimeProvider timeProvider,
@@ -96,7 +95,9 @@ public sealed partial class DatabaseInitializer(
         string projectName,
         CancellationToken cancellationToken)
     {
-        var existing = await tenantStore.FindBySlugAsync(slug, cancellationToken);
+        var existing = await dbContext.Tenants
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Slug == slug, cancellationToken);
         if (existing is not null)
         {
             return;
