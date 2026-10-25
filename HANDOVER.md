@@ -1,6 +1,8 @@
-# Handover
+# Engineering notes
 
-A practical guide for the next engineer or AI agent picking up this repository.
+A practical guide for anyone picking up this repository: the rules that keep tenant isolation
+intact, where things live, how to run everything, and what to read before changing behaviour.
+It doubles as the onboarding path for a new contributor (or an AI pair).
 
 ---
 
@@ -9,10 +11,10 @@ A practical guide for the next engineer or AI agent picking up this repository.
 | Area | State |
 | --- | --- |
 | Build | `dotnet build multitenant-aspnet-api.slnx` succeeds with 0 warnings (warnings are errors) |
-| Unit tests | 32 passing |
-| Integration tests | 54 passing against Testcontainers PostgreSQL 16 |
-| API surface | Auth, tenants, users, projects, tasks, health, OpenAPI |
-| Migrations | One squashed `InitialCreate` migration, applied automatically in Development |
+| Unit tests | 40 passing |
+| Integration tests | 64 passing against Testcontainers PostgreSQL 16 |
+| API surface | Auth, tenants (onboard/current/rename/features), users, projects, tasks, health, OpenAPI |
+| Migrations | `InitialCreate` plus `TenantFeatures`, applied automatically in Development |
 | Docker | `Dockerfile` and `compose.yaml` are current; image builds |
 | CI | `.github/workflows/ci.yml` builds, tests and publishes to GHCR on `main`/`master` and tags |
 
@@ -62,6 +64,9 @@ Read these before changing anything touching data or auth.
 11. **Analyzers are strict.** `TreatWarningsAsErrors=true` and `AnalysisLevel=latest-recommended`.
     Use `[LoggerMessage]` partial methods (CA1848), and keep CA1861/CA1707 suppressions where
     they are (migrations and test names only).
+12. **Feature flags are per-tenant kill switches.** A key must be added to `TenantFeatureKeys`
+    and have a real consumer before it is exposed; an absent row means enabled, and a disabled
+    feature returns `404` with its own code (see ADR 0009).
 
 ---
 
@@ -112,6 +117,7 @@ cross-platform.
 | Write guard + timestamps | `src/Multitenant.Infrastructure/Persistence/TenantAuditingInterceptor.cs` |
 | Seeding | `src/Multitenant.Infrastructure/Persistence/DatabaseInitializer.cs` |
 | Tenant onboarding transaction | `src/Multitenant.Infrastructure/Services/TenantService.cs` |
+| Per-tenant feature switches | `src/Multitenant.Infrastructure/Services/TenantFeatureService.cs` |
 | User/role rules | `src/Multitenant.Infrastructure/Services/UserService.cs` |
 | User creation (all paths) | `src/Multitenant.Infrastructure/Identity/UserProvisioningService.cs` |
 | Project/task queries | `src/Multitenant.Infrastructure/Services/ProjectService.cs`, `TaskService.cs` |
@@ -178,6 +184,14 @@ cross-platform.
 - **Status codes**: validation 400 (`validation_failed`), auth 401, role 403, missing/foreign
   resource 404, duplicates 409, rate limit 429 (`rate_limited`), disabled feature 404
   (`feature_disabled`).
+- **Feature switches are per tenant and default to enabled.** `GET /tenants/current/features`
+  reports the effective value of every whitelisted key; `PUT /tenants/current/features/{key}` is
+  Owner-only and rejects unknown keys with `404 unknown_feature`. Disabling `task_assignment`
+  makes create/update with an assignee return `404 task_assignment_disabled`; unassigned tasks
+  keep working. The first read of a key costs one indexed row lookup.
+- **Renaming a tenant never changes its slug.** The slug is the login key
+  (`tenantSlug` + email), so `PUT /tenants/current` only touches `Name`. There is deliberately no
+  tenant list or self-service deactivation: see ADR 0010 and the known-gaps section.
 - **Health checks** are anonymous: `/health`, `/health/live`, `/health/ready`. They bypass
   rate limiting so probes never report false failures.
 - **Email confirmation** works even when `Identity:RequireConfirmedEmail=false`; resend is a
@@ -257,9 +271,8 @@ cross-platform.
 5. Persisted audit trail for security events.
 6. Templated emails and a real provider (SES / Azure Communication Services).
 7. Optional caching of the per-request user/security-stamp lookup.
-8. Per-tenant feature flags (PDF stretch item; only deployment-wide flags exist today).
-9. Tenant management endpoints (list/update/deactivate/delete); onboarding, `current` and
-   get-by-id exist today.
+8. Introduce a platform-administrator role if tenant listing, deactivation and reactivation are
+   ever needed; today the API is intentionally tenant-scoped only (ADR 0010).
 
 ---
 
@@ -286,8 +299,8 @@ cross-platform.
 
 1. `git status` — expect a clean tree.
 2. `dotnet build multitenant-aspnet-api.slnx` — expect 0 warnings.
-3. `dotnet test tests/Multitenant.UnitTests` — expect 32 passing.
-4. Start Docker, then `dotnet test tests/Multitenant.IntegrationTests` — expect 54 passing.
+3. `dotnet test tests/Multitenant.UnitTests` — expect 40 passing.
+4. Start Docker, then `dotnet test tests/Multitenant.IntegrationTests` — expect 64 passing.
 5. `cp .env.example .env` and adjust `JWT_SIGNING_KEY`/`POSTGRES_PASSWORD`. Demo accounts are
    opt-in: set `SEED_DEMO_DATA=true` and a `DEMO_PASSWORD` of your choice, then
    `docker compose up --build`, open <http://localhost:8080/scalar>, log in as

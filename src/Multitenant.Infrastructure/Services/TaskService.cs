@@ -12,6 +12,7 @@ namespace Multitenant.Infrastructure.Services;
 public sealed class TaskService(
     AppDbContext dbContext,
     ITenantContext tenantContext,
+    ITenantFeatureService tenantFeatureService,
     TimeProvider timeProvider) : ITaskService
 {
     private static readonly HashSet<string> SortFields = new(StringComparer.OrdinalIgnoreCase)
@@ -114,6 +115,7 @@ public sealed class TaskService(
             throw new NotFoundException("Project not found.");
         }
 
+        await EnsureTaskAssignmentEnabledAsync(request.AssigneeUserId, cancellationToken);
         await EnsureAssigneeBelongsToTenantAsync(request.AssigneeUserId, cancellationToken);
 
         var task = new WorkItem
@@ -146,6 +148,7 @@ public sealed class TaskService(
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken)
             ?? throw new NotFoundException("Task not found.");
 
+        await EnsureTaskAssignmentEnabledAsync(request.AssigneeUserId, cancellationToken);
         await EnsureAssigneeBelongsToTenantAsync(request.AssigneeUserId, cancellationToken);
 
         task.Title = request.Title.Trim();
@@ -187,6 +190,26 @@ public sealed class TaskService(
         if (!exists)
         {
             throw new NotFoundException("Assignee not found.");
+        }
+    }
+
+    /// <summary>
+    /// Assignment is the first tenant feature with a real consumer: a tenant that
+    /// switched it off gets 404, not 403, so the API does not advertise a capability
+    /// the tenant cannot use.
+    /// </summary>
+    private async Task EnsureTaskAssignmentEnabledAsync(Guid? assigneeUserId, CancellationToken cancellationToken)
+    {
+        if (assigneeUserId is null)
+        {
+            return;
+        }
+
+        if (!await tenantFeatureService.IsEnabledAsync(TenantFeatureKeys.TaskAssignment, cancellationToken))
+        {
+            throw new FeatureDisabledException(
+                "Task assignment is disabled for this tenant.",
+                "task_assignment_disabled");
         }
     }
 

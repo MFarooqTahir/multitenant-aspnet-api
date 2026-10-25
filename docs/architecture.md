@@ -117,6 +117,7 @@ resource exists in another tenant.
 erDiagram
     Tenants ||--o{ AspNetUsers : "owns"
     Tenants ||--o{ Projects : "owns"
+    Tenants ||--o{ TenantFeatures : "configures"
     Projects ||--o{ WorkItems : "has"
     AspNetUsers ||--o{ WorkItems : "assigned"
     AspNetUsers ||--o{ RefreshTokens : "owns"
@@ -129,6 +130,12 @@ erDiagram
         varchar Name
         bool IsActive
         timestamptz CreatedAtUtc
+    }
+    TenantFeatures {
+        uuid TenantId PK
+        varchar Key PK
+        bool IsEnabled
+        timestamptz UpdatedAtUtc
     }
     AspNetUsers {
         uuid Id PK
@@ -185,9 +192,9 @@ erDiagram
 `AspNetUsers` and `Projects` also carry a unique alternate key on `(TenantId, Id)` so
 `WorkItems` can reference them with composite foreign keys.
 
-Schema and demo data are created by the single migration
-`Persistence/Migrations/20261024230047_InitialCreate`, applied automatically when
-`Database:AutoMigrate` is on.
+Schema and demo data are created by the migrations in `Persistence/Migrations`
+(`InitialCreate`, then `TenantFeatures`), applied automatically when `Database:AutoMigrate` is
+on.
 
 ## Where to look
 
@@ -200,6 +207,7 @@ Schema and demo data are created by the single migration
 | User creation (registration + admin) | `src/Multitenant.Infrastructure/Identity/UserProvisioningService.cs` |
 | Refresh token hashing/rotation helpers | `src/Multitenant.Infrastructure/Identity/RefreshTokenManager.cs` |
 | Tenant onboarding transaction | `src/Multitenant.Infrastructure/Services/TenantService.cs` |
+| Per-tenant feature switches | `src/Multitenant.Infrastructure/Services/TenantFeatureService.cs` |
 | User/role rules (last-Owner guard) | `src/Multitenant.Infrastructure/Services/UserService.cs` |
 | Error contract | `src/Multitenant.Api/Middleware/GlobalExceptionHandler.cs` |
 | Rate limiting | `src/Multitenant.Api/RateLimiting/RateLimitingSetup.cs` |

@@ -123,6 +123,29 @@ Content-Type: application/json
 GET {{api}}/tenants/current
 Authorization: Bearer {{accessToken}}
 
+### Rename the current tenant (Owner only; the slug is the immutable login key)
+PUT {{api}}/tenants/current
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Acme Collective"
+}
+
+### List the current tenant's feature switches (any role)
+GET {{api}}/tenants/current/features
+Authorization: Bearer {{accessToken}}
+
+### Switch a feature for the current tenant (Owner only)
+# task_assignment is the whitelisted key today. Disabled = 404 on assignment.
+PUT {{api}}/tenants/current/features/task_assignment
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "isEnabled": false
+}
+
 ### List users (Owner/Admin)
 GET {{api}}/users?page=1&pageSize=20&sort=createdAt
 Authorization: Bearer {{accessToken}}

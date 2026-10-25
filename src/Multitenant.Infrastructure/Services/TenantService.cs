@@ -85,6 +85,22 @@ public sealed partial class TenantService(
         return ToResponse(tenant);
     }
 
+    public async Task<TenantResponse> UpdateCurrentAsync(
+        UpdateTenantRequest request,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = tenantContext.TenantId ?? throw new UnauthorizedException();
+
+        var tenant = await dbContext.Tenants
+            .FirstOrDefaultAsync(x => x.Id == tenantId, cancellationToken)
+            ?? throw new NotFoundException("Tenant not found.");
+
+        tenant.Rename(request.Name);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return ToResponse(tenant);
+    }
+
     private void AddStarterData(Tenant tenant)
     {
         var project = new Project

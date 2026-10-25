@@ -18,6 +18,8 @@ public sealed class AppDbContext(
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
+    public DbSet<TenantFeature> TenantFeatures => Set<TenantFeature>();
+
     /// <summary>
     /// Global query filters must reference a DbContext member (not the injected
     /// <see cref="ITenantContext"/> closure) because EF Core caches the model per
@@ -149,6 +151,24 @@ public sealed class AppDbContext(
                 .WithMany()
                 .HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<TenantFeature>(entity =>
+        {
+            // Composite key: a feature key is unique per tenant, and the tenant is part
+            // of the identity so the same key can never collide across tenants.
+            entity.ToTable("TenantFeatures");
+            entity.HasKey(x => new { x.TenantId, x.Key });
+            entity.Property(x => x.Key).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.IsEnabled).IsRequired();
+            entity.Property(x => x.UpdatedAtUtc).IsRequired();
+
+            entity.HasOne<Tenant>()
+                .WithMany()
+                .HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasQueryFilter(x => x.TenantId == CurrentTenantId);
         });
     }
 }

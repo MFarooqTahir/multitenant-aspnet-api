@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json.Serialization;
 using Asp.Versioning;
 using FluentValidation;
 using Microsoft.ApplicationInsights.Extensibility;
@@ -67,7 +68,12 @@ if (forwardedHeaders.Enabled)
     builder.Services.Configure<ForwardedHeadersOptions>(forwardedHeaders.Apply);
 }
 
-builder.Services.AddControllers(options => options.Filters.Add<ValidationFilter>());
+// Enums cross the wire as readable names ("Active", "High"); numeric values are still
+// accepted on input so existing clients keep working.
+builder.Services
+    .AddControllers(options => options.Filters.Add<ValidationFilter>())
+    .AddJsonOptions(options =>
+        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 builder.Services.AddScoped<ValidationFilter>();
 builder.Services.AddValidatorsFromAssemblyContaining<OnboardTenantRequestValidator>();

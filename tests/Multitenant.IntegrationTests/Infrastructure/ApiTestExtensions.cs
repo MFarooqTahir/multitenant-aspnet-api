@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Multitenant.IntegrationTests.Infrastructure;
 
@@ -11,7 +12,10 @@ namespace Multitenant.IntegrationTests.Infrastructure;
 /// </summary>
 public static class ApiTestExtensions
 {
-    public static JsonSerializerOptions JsonOptions { get; } = new(JsonSerializerDefaults.Web);
+    public static JsonSerializerOptions JsonOptions { get; } = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter() },
+    };
 
     public static StringContent JsonContent(object value) =>
         new(JsonSerializer.Serialize(value, JsonOptions), Encoding.UTF8, "application/json");

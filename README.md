@@ -4,7 +4,7 @@
 ![ASP.NET Core](https://img.shields.io/badge/ASP.NET%20Core-10-512BD4)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791)
 ![EF Core](https://img.shields.io/badge/EF%20Core-10-512BD4)
-![Tests](https://img.shields.io/badge/tests-32%20unit%20%2B%2054%20integration-2ea44f)
+![Tests](https://img.shields.io/badge/tests-40%20unit%20%2B%2064%20integration-2ea44f)
 ![CI](https://github.com/MFarooqTahir/multitenant-aspnet-api/actions/workflows/ci.yml/badge.svg)
 ![Licence](https://img.shields.io/badge/licence-MIT-blue)
 
@@ -19,21 +19,65 @@ of it is tested and operated.
 
 ---
 
+## Demo: the isolation proof, in one request
+
+Start the seeded stack (see [Quick start](#quick-start)), then create a project as the owner of
+`acme` and ask for that same id as the owner of `globex`:
+
+```bash
+# 1. Create a project as the acme owner. Note the id in the response.
+curl -s http://localhost:5270/api/v1/projects \
+  -H "Authorization: Bearer <acme-access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Acme Rocket","status":"Active"}'
+# 201 Created
+# {"id":"8f3cff21-...","name":"Acme Rocket","status":"Active", ...}
+
+# 2. Ask for the same project as the globex owner.
+curl -s http://localhost:5270/api/v1/projects/8f3cff21-... \
+  -H "Authorization: Bearer <globex-access-token>"
+```
+
+```json
+{
+  "type": "https://datatracker.ietf.org/doc/html/rfc9110#section-15.5.5",
+  "title": "Not Found",
+  "status": 404,
+  "detail": "Project not found.",
+  "instance": "/api/v1/projects/8f3cff21-...",
+  "code": "not_found",
+  "traceId": "00-35376aacd73ad8078b53a4d832ad1e0d-28dc0d7b8f93279d-00",
+  "correlationId": "0HNPIOTPBJO33:00000004"
+}
+```
+
+`acme` gets `200` for the very same id, `globex` gets `404` — never `403`, so the response does
+not confirm the project exists in another tenant. That behaviour is enforced by the EF Core
+query filters, the write interceptor and composite foreign keys, and it is locked down by
+`TenantIsolationTests`:
+
+```bash
+dotnet test tests/Multitenant.IntegrationTests --filter "FullyQualifiedName~TenantIsolation"
+```
+
+---
+
 ## Contents
 
-1. [What this project demonstrates](#what-this-project-demonstrates)
-2. [Quick start](#quick-start)
-3. [Security model](#security-model)
-4. [Architecture](#architecture)
-5. [API reference](#api-reference)
-6. [Configuration](#configuration)
-7. [Testing](#testing)
-8. [Operations](#operations)
-9. [Design decisions](#design-decisions)
-10. [Repository layout](#repository-layout)
-11. [Known limitations and roadmap](#known-limitations-and-roadmap)
-12. [How this was built](#how-this-was-built)
-13. [Licence](#licence)
+1. [Demo](#demo-the-isolation-proof-in-one-request)
+2. [What this project demonstrates](#what-this-project-demonstrates)
+3. [Quick start](#quick-start)
+4. [Security model](#security-model)
+5. [Architecture](#architecture)
+6. [API reference](#api-reference)
+7. [Configuration](#configuration)
+8. [Testing](#testing)
+9. [Operations](#operations)
+10. [Design decisions](#design-decisions)
+11. [Repository layout](#repository-layout)
+12. [Known limitations and roadmap](#known-limitations-and-roadmap)
+13. [How this was built](#how-this-was-built)
+14. [Licence](#licence)
 
 ---
 
@@ -48,8 +92,10 @@ of it is tested and operated.
 | EF Core global query filters, composite keys, interceptors, one squashed migration | `Persistence/` |
 | RFC 7807 error modelling with stable machine codes | `GlobalExceptionHandler`, `ProblemDetailsStatusCodePages` |
 | Per-tenant and per-IP rate limiting | [ADR 0006](docs/adr/0006-rate-limiting.md), `RateLimitingSetup` |
+| Per-tenant feature flags with whitelisted keys | [ADR 0009](docs/adr/0009-per-tenant-feature-flags.md), `TenantFeatureTests` |
+| Tenant rename with an immutable login slug | [ADR 0010](docs/adr/0010-tenant-lifecycle-scope.md), `TenantManagementTests` |
 | FluentValidation, fail-closed at startup | `Validation/`, `ValidationFilterAssertion` |
-| 86 tests: unit + Testcontainers integration against real PostgreSQL | [Testing](#testing) |
+| 104 tests: 40 unit + 64 integration, Testcontainers against real PostgreSQL | [Testing](#testing) |
 | Clean layering, one-way dependencies, no business logic in controllers | [ADR 0002](docs/adr/0002-layered-solution.md) |
 | Docker multi-stage image, compose stack, CI publishing to GHCR | [Operations](#operations), `.github/workflows/ci.yml` |
 | Correlation ids, Serilog JSON logging, optional App Insights | [ADR 0007](docs/adr/0007-observability.md) |
@@ -225,6 +271,10 @@ cannot be used to probe which addresses exist.
   Owner/Admin. Anonymous joining by slug is deliberately not supported — a slug is not a
   credential ([ADR 0008](docs/adr/0008-admin-only-registration.md)). Public sign-up, if a
   product needs it, belongs in a signed-invite or email-domain allow-list flow.
+- **Feature switches are per tenant.** An Owner can turn a whitelisted capability off for their
+  tenant (`task_assignment` today); a disabled capability returns `404` with a specific code, and
+  a tenant with no override keeps the default (enabled) behaviour
+  ([ADR 0009](docs/adr/0009-per-tenant-feature-flags.md)).
 
 ### Error contract
 
@@ -303,6 +353,9 @@ version at `/openapi/v1.json`; interactive docs at `/scalar`.
 | --- | --- | --- | --- |
 | POST | `/tenants/onboard` | anonymous, IP-limited | Provision tenant + owner + starter data in one transaction |
 | GET | `/tenants/current` | member | The tenant resolved from the token |
+| PUT | `/tenants/current` | Owner | Rename the current tenant (the slug is immutable) |
+| GET | `/tenants/current/features` | member | Effective per-tenant feature switches |
+| PUT | `/tenants/current/features/{key}` | Owner | Enable or disable a whitelisted feature for this tenant |
 | GET | `/tenants/{id}` | member | Your own tenant by id (the onboarding `Location` target); other ids → `404` |
 
 ### Users
@@ -400,8 +453,9 @@ These values are for local development only; production must come from a secret 
 
 ### Migrations
 
-The schema is one squashed `InitialCreate` migration covering every table, index, alternate key
-and check constraint. Change the model, then add a migration on top:
+The schema starts from a squashed `InitialCreate` migration covering every table, index,
+alternate key and check constraint; later changes are added on top (`TenantFeatures` is the
+first). Change the model, then add a migration:
 
 ```bash
 dotnet ef migrations add <Name> \
@@ -421,7 +475,7 @@ API's `appsettings*.json`, then falls back to the Development connection string.
 
 ## Testing
 
-**86 tests: 32 unit + 54 integration.** No mocks of the data layer and no in-memory database —
+**104 tests: 40 unit + 64 integration.** No mocks of the data layer and no in-memory database —
 integration tests run against a real PostgreSQL 16 container (Testcontainers).
 
 ```bash
@@ -447,6 +501,8 @@ offset overflow, claim generation, 2FA challenge validation and refresh-token ha
 - email confirmation end-to-end with a captured email sender, and resend behaviour;
 - two-factor enable, login challenge, single-use recovery codes and disable;
 - paging, sorting, search and status/priority/date filters;
+- per-tenant feature switches, including the assignment block and tenant-scoped overrides;
+- tenant rename permissions and the immutable slug;
 - per-IP and per-tenant rate limiting, including health-endpoint exemptions;
 - startup configuration validation (JWT key, email provider, forwarded proxies);
 - health checks, OpenAPI (including the bearer scheme), 404/405 handling, correlation ids
@@ -525,6 +581,8 @@ permissions (`packages: write`) or a `CR_PAT`.
 | [0006](docs/adr/0006-rate-limiting.md) | Per-tenant rate limiting with the built-in limiter |
 | [0007](docs/adr/0007-observability.md) | Structured logging and RFC 7807 errors |
 | [0008](docs/adr/0008-admin-only-registration.md) | Registration is a tenant-admin action |
+| [0009](docs/adr/0009-per-tenant-feature-flags.md) | Per-tenant feature flags as kill switches |
+| [0010](docs/adr/0010-tenant-lifecycle-scope.md) | Tenant lifecycle stays tenant-scoped |
 
 ### What changes at 10x scale
 
@@ -549,7 +607,7 @@ The design is deliberately single-node and single-database today:
 ├── .github/workflows/ci.yml           build, test, publish to GHCR
 ├── .env.example                       compose environment template
 ├── README.md                          product, API and setup guide
-├── HANDOVER.md                        engineering handover for the next agent
+├── HANDOVER.md                        engineering notes for contributors and agents
 ├── compose.yaml                       PostgreSQL + API for local runs
 ├── Directory.Build.props              shared compiler/analyser settings
 ├── global.json                        SDK pin
@@ -599,8 +657,10 @@ Deliberate scope cuts, not oversights:
   extension.
 - **No audit trail table.** Security events are logged, not persisted as domain records.
 - **Email templates are inline strings**, not a templating system.
-- **Tenant management endpoints are minimal.** Onboarding, `current` and get-by-id exist today;
-  list/update/deactivate/delete do not.
+- **Tenant lifecycle is tenant-scoped by design.** Owners can rename their tenant, but there is
+  no cross-tenant tenant list and no self-service deactivation: the API has no platform
+  administrator, an exposed list would confirm other tenants exist, and an irreversible lockout
+  needs an operator model first ([ADR 0010](docs/adr/0010-tenant-lifecycle-scope.md)).
 
 ---
 

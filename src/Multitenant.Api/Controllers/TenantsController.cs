@@ -12,7 +12,9 @@ namespace Multitenant.Api.Controllers;
 [ApiController]
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}/tenants")]
-public sealed class TenantsController(ITenantService tenantService) : ControllerBase
+public sealed class TenantsController(
+    ITenantService tenantService,
+    ITenantFeatureService tenantFeatureService) : ControllerBase
 {
     /// <summary>
     /// Provisions a new tenant (roles, owner account and starter data) in one transaction.
@@ -39,6 +41,45 @@ public sealed class TenantsController(ITenantService tenantService) : Controller
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<TenantResponse>> Current(CancellationToken cancellationToken) =>
         Ok(await tenantService.GetCurrentAsync(cancellationToken));
+
+    /// <summary>
+    /// Renames the current tenant. The slug is immutable because it is the login key;
+    /// renaming the tenant never changes how users sign in.
+    /// </summary>
+    [HttpPut("current")]
+    [Authorize(Policy = Policies.OwnerOnly)]
+    [ProducesResponseType<TenantResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<TenantResponse>> UpdateCurrent(
+        UpdateTenantRequest request,
+        CancellationToken cancellationToken) =>
+        Ok(await tenantService.UpdateCurrentAsync(request, cancellationToken));
+
+    /// <summary>Lists every feature switch and its effective value for this tenant.</summary>
+    [HttpGet("current/features")]
+    [Authorize(Policy = Policies.Member)]
+    [ProducesResponseType<IReadOnlyList<TenantFeatureResponse>>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<TenantFeatureResponse>>> GetFeatures(
+        CancellationToken cancellationToken) =>
+        Ok(await tenantFeatureService.ListAsync(cancellationToken));
+
+    /// <summary>
+    /// Turns one whitelisted feature on or off for this tenant. Owner only; an unknown
+    /// key is a 404 because it names a capability that does not exist.
+    /// </summary>
+    [HttpPut("current/features/{key}")]
+    [Authorize(Policy = Policies.OwnerOnly)]
+    [ProducesResponseType<TenantFeatureResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<TenantFeatureResponse>> UpdateFeature(
+        string key,
+        UpdateTenantFeatureRequest request,
+        CancellationToken cancellationToken) =>
+        Ok(await tenantFeatureService.SetAsync(key, request.IsEnabled, cancellationToken));
 
     /// <summary>
     /// Returns a tenant by id. Only the caller's own tenant is reachable, so the

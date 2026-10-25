@@ -358,6 +358,26 @@ namespace Multitenant.Infrastructure.Persistence.Migrations
                     b.ToTable("Tenants", (string)null);
                 });
 
+            modelBuilder.Entity("Multitenant.Domain.Entities.TenantFeature", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Key")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("TenantId", "Key");
+
+                    b.ToTable("TenantFeatures", (string)null);
+                });
+
             modelBuilder.Entity("Multitenant.Domain.Entities.WorkItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -498,6 +518,15 @@ namespace Multitenant.Infrastructure.Persistence.Migrations
                     b.HasOne("Multitenant.Domain.Entities.AppUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Multitenant.Domain.Entities.TenantFeature", b =>
+                {
+                    b.HasOne("Multitenant.Domain.Entities.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

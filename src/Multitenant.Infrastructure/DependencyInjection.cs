@@ -108,6 +108,7 @@ public static class DependencyInjection
         services.AddScoped<RefreshTokenManager>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<ITenantService, TenantService>();
+        services.AddScoped<ITenantFeatureService, TenantFeatureService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IUserProvisioningService, UserProvisioningService>();
         services.AddScoped<IProjectService, ProjectService>();
