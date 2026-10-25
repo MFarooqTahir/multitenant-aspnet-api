@@ -30,6 +30,11 @@ jobs:
           # newest patch advertised by the release index, which the installer
           # could not download, failing the job before restore.
           dotnet-version: "10.0.401"
+          # The default LTS pre-pass independently resolves the newest LTS
+          # runtime; when the release index advertises an unpublished build the
+          # pre-pass warns even though the SDK installs fine. The requested SDK
+          # ships its own host, so the pre-pass adds nothing here.
+          skip-lts-prepass: true
 
       - name: Restore
         run: dotnet restore multitenant-aspnet-api.slnx
