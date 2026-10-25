@@ -21,6 +21,11 @@ of it is tested and operated.
 
 ## Demo: the isolation proof, in one request
 
+![Cross-tenant isolation: the globex owner receives a 404 for an acme project](docs/images/isolation-demo.png)
+
+*Authenticated as the `globex` owner and requesting a project that belongs to `acme`: the API
+returns `404` and never confirms that the resource exists in another tenant.*
+
 Start the seeded stack (see [Quick start](#quick-start)), then create a project as the owner of
 `acme` and ask for that same id as the owner of `globex`:
 
@@ -331,6 +336,8 @@ and there is exactly one way to do each thing: one tenant context, one user-crea
 Base path `/api/v1`. All timestamps are UTC. Versioned routes and an OpenAPI document per
 version at `/openapi/v1.json`; interactive docs at `/scalar`.
 
+![Scalar API reference showing the Tenants endpoints](docs/images/scalar-ui.png)
+
 ### Auth
 
 | Method | Route | Auth | Purpose |
@@ -614,6 +621,7 @@ The design is deliberately single-node and single-database today:
 ├── multitenant-aspnet-api.slnx
 ├── docs/
 │   ├── architecture.md                diagrams: context, pipeline, ER, refresh states
+│   ├── images/                        demo screenshots used by this README
 │   └── adr/                           architecture decision records
 ├── src/
 │   ├── Multitenant.Api/               controllers, endpoints, middleware, filters, rate limiting, Program
