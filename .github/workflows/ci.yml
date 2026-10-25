@@ -26,7 +26,10 @@ jobs:
       - name: Set up .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          # Pinned to the SDK in global.json. A floating 10.0.x resolved to the
+          # newest patch advertised by the release index, which the installer
+          # could not download, failing the job before restore.
+          dotnet-version: "10.0.401"
 
       - name: Restore
         run: dotnet restore multitenant-aspnet-api.slnx
