@@ -21,8 +21,10 @@ documentation, so the logging format must be portable.
   it on `HttpContext.Items`, echoes it on the response and pushes it into the Serilog context.
   Every problem response includes `traceId` and `correlationId`.
 - **Errors** — `IExceptionHandler` maps domain/application exceptions to `problem+json` with a
-  stable `code`, and status-code pages give framework-generated 401/403/404/405 responses the
-  same shape. Stack traces appear only in Development.
+  stable `code`, status-code pages give framework-generated 401/403/404/405 responses the
+  same shape, and `ApiBehaviorOptions.InvalidModelStateResponseFactory` gives model-binding
+  failures (malformed JSON, unparsable query values) the same `validation_failed` contract as
+  FluentValidation. Stack traces appear only in Development.
 - **CloudWatch** — no extra sink is required: the container writes JSON to stdout, which is
   the canonical CloudWatch Logs input. Structured properties are preserved as JSON keys and
   can be queried with CloudWatch Logs Insights.

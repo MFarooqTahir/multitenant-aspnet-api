@@ -93,6 +93,38 @@ public sealed class AuthLifecycleTests : IntegrationTestBase
     }
 
     [Fact]
+    public async Task LogoutCannotRevokeAnotherUsersSession()
+    {
+        using var client = CreateClient();
+        var owner = await Scenarios.OnboardAndLoginAsync(client, "auth-logout-owner", "logout-owner@acme.test");
+
+        var registered = await client.PostApi(
+            "/api/v1/auth/register",
+            new RegisterRequest("auth-logout-owner", "logout-member@acme.test", "Logout Member", Scenarios.Password),
+            owner.AccessToken);
+        Assert.Equal(HttpStatusCode.Created, registered.StatusCode);
+
+        var member = await Scenarios.LoginAsync(
+            client,
+            "auth-logout-owner",
+            "logout-member@acme.test",
+            Scenarios.Password);
+
+        // The member presents the owner's refresh token. Logout is a no-op rather
+        // than a way to end someone else's session.
+        var logout = await client.PostApi(
+            "/api/v1/auth/logout",
+            new LogoutRequest(owner.RefreshToken),
+            member.AccessToken);
+        Assert.Equal(HttpStatusCode.NoContent, logout.StatusCode);
+
+        var refreshed = await client.PostApi(
+            "/api/v1/auth/refresh",
+            new RefreshTokenRequest(owner.RefreshToken));
+        Assert.Equal(HttpStatusCode.OK, refreshed.StatusCode);
+    }
+
+    [Fact]
     public async Task RoleChangeInvalidatesAccessTokensAndRefreshPicksUpTheNewRole()
     {
         using var client = CreateClient();

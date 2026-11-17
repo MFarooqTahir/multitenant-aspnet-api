@@ -1,0 +1,14 @@
+# Local demo overlay: seeds the two demo tenants so cross-tenant isolation is
+# visible in about a minute. Never use this file for a shared or public deployment.
+#
+#   cp .env.example .env
+#   docker compose -f compose.yaml -f compose.demo.yaml up --build
+#
+# Demo accounts (password from Demo__Password below):
+#   acme   owner@acme.test   / member@acme.test
+#   globex owner@globex.test / member@globex.test
+services:
+  api:
+    environment:
+      Database__SeedDemoData: "true"
+      Demo__Password: Demo123!Passw0rd

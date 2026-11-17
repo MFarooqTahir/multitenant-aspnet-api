@@ -79,12 +79,41 @@ public sealed partial class DatabaseInitializer(
                 continue;
             }
 
-            var result = await roleManager.CreateAsync(new AppRole(role));
-            if (!result.Succeeded)
+            try
             {
-                throw new InvalidOperationException(
-                    $"Could not seed role '{role}': {string.Join(" ", result.Errors.Select(x => x.Description))}");
+                var result = await roleManager.CreateAsync(new AppRole(role));
+                if (!result.Succeeded && !await roleManager.RoleExistsAsync(role))
+                {
+                    throw new InvalidOperationException(
+                        $"Could not seed role '{role}': {string.Join(" ", result.Errors.Select(x => x.Description))}");
+                }
             }
+            catch (DbUpdateException)
+            {
+                // Two replicas can pass the existence check at the same time; the
+                // unique index rejects the loser. That is benign as long as the role
+                // now exists. The failed entity must be detached, otherwise the next
+                // SaveChanges would retry the duplicate insert.
+                DetachPendingRole(role);
+
+                if (!await roleManager.RoleExistsAsync(role))
+                {
+                    throw;
+                }
+            }
+        }
+    }
+
+    private void DetachPendingRole(string role)
+    {
+        var pending = dbContext.ChangeTracker
+            .Entries<AppRole>()
+            .FirstOrDefault(entry => entry.State == EntityState.Added
+                && string.Equals(entry.Entity.Name, role, StringComparison.Ordinal));
+
+        if (pending is not null)
+        {
+            pending.State = EntityState.Detached;
         }
     }
 

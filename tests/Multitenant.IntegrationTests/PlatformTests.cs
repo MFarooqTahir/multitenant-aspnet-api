@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Multitenant.Api.Configuration;
@@ -61,6 +62,51 @@ public sealed class PlatformTests : IntegrationTestBase
         var problem = await response.ReadAsync<Microsoft.AspNetCore.Mvc.ValidationProblemDetails>();
         Assert.Equal("validation_failed", problem.Extensions["code"]?.ToString());
         Assert.Contains("slug", problem.Errors.Keys, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task MalformedJsonReturnsValidationProblemWithCode()
+    {
+        using var client = CreateClient();
+
+        using var content = new StringContent("{ not json", Encoding.UTF8, "application/json");
+        var response = await client.PostAsync("/api/v1/auth/login", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+
+        var problem = await response.ReadAsync<Microsoft.AspNetCore.Mvc.ValidationProblemDetails>();
+        Assert.Equal("validation_failed", problem.Extensions["code"]?.ToString());
+    }
+
+    [Fact]
+    public async Task UnparsableQueryValuesReturnValidationProblemWithCode()
+    {
+        using var client = CreateClient();
+        var tokens = await Scenarios.OnboardAndLoginAsync(client, "platform-binding", "binding@acme.test");
+
+        var badPage = await client.GetApi("/api/v1/projects?page=not-a-number", tokens.AccessToken);
+        Assert.Equal(HttpStatusCode.BadRequest, badPage.StatusCode);
+
+        var pageProblem = await badPage.ReadAsync<Microsoft.AspNetCore.Mvc.ValidationProblemDetails>();
+        Assert.Equal("validation_failed", pageProblem.Extensions["code"]?.ToString());
+        Assert.Contains("page", pageProblem.Errors.Keys, StringComparer.OrdinalIgnoreCase);
+
+        var badEnum = await client.GetApi("/api/v1/projects?status=NotAStatus", tokens.AccessToken);
+        Assert.Equal(HttpStatusCode.BadRequest, badEnum.StatusCode);
+
+        var enumProblem = await badEnum.ReadAsync<Microsoft.AspNetCore.Mvc.ValidationProblemDetails>();
+        Assert.Equal("validation_failed", enumProblem.Extensions["code"]?.ToString());
+        Assert.Contains("status", enumProblem.Errors.Keys, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void NonHttpsPublicBaseUrlFailsStartup()
+    {
+        using var factory = Harness.CreateFactory(configuration =>
+            configuration["Auth:PublicBaseUrl"] = "http://api.example.com");
+
+        Assert.ThrowsAny<Exception>(factory.CreateClient);
     }
 
     [Fact]

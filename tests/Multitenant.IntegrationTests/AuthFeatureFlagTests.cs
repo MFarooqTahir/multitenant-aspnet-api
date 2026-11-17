@@ -167,6 +167,58 @@ public sealed class AuthFeatureFlagTests : IntegrationTestBase
         Assert.False(string.IsNullOrWhiteSpace(plainTokens.AccessToken));
     }
 
+    [Fact]
+    public async Task TwoFactorVerificationLocksOutAfterRepeatedBadCodes()
+    {
+        await using var factory = Harness.CreateFactory(configuration =>
+            configuration["Identity:EnableTwoFactor"] = "true");
+        using var client = factory.CreateClient();
+
+        var tokens = await Scenarios.OnboardAndLoginAsync(client, "flag-2fa-lockout", "lockout@acme.test");
+
+        var setupResponse = await client.PostApi("/api/v1/auth/2fa/setup", null, tokens.AccessToken);
+        var setup = await setupResponse.ReadAsync<TwoFactorSetupResponse>();
+
+        var postSetupTokens = await Scenarios.LoginAsync(
+            client,
+            "flag-2fa-lockout",
+            "lockout@acme.test",
+            Scenarios.Password);
+
+        var enable = await client.PostApi(
+            "/api/v1/auth/2fa/enable",
+            new TwoFactorEnableRequest(Totp.Compute(setup.SharedKey, DateTimeOffset.UtcNow)),
+            postSetupTokens.AccessToken);
+        Assert.Equal(HttpStatusCode.OK, enable.StatusCode);
+
+        var loginResponse = await client.PostApi(
+            "/api/v1/auth/login",
+            new LoginRequest("flag-2fa-lockout", "lockout@acme.test", Scenarios.Password));
+
+        using var loginJson = System.Text.Json.JsonDocument.Parse(await loginResponse.Content.ReadAsStringAsync());
+        var challenge = loginJson.RootElement.GetProperty("twoFactorToken").GetString();
+
+        var correctCode = Totp.Compute(setup.SharedKey, DateTimeOffset.UtcNow);
+        var wrongCode = correctCode == "000000" ? "111111" : "000000";
+
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            var bad = await client.PostApi(
+                "/api/v1/auth/2fa/verify",
+                new TwoFactorVerifyRequest(challenge!, wrongCode, null));
+
+            Assert.Equal(HttpStatusCode.Unauthorized, bad.StatusCode);
+        }
+
+        // Five bad codes trip the same lockout the password path uses, so even the
+        // correct code must be rejected until the lockout expires.
+        var lockedOut = await client.PostApi(
+            "/api/v1/auth/2fa/verify",
+            new TwoFactorVerifyRequest(challenge!, correctCode, null));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, lockedOut.StatusCode);
+    }
+
     private static async Task<HttpResponseMessage> VerifyWithRecoveryCodeAsync(
         HttpClient client,
         string recoveryCode)

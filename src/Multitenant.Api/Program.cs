@@ -1,10 +1,7 @@
-using System.Globalization;
 using System.Text.Json.Serialization;
 using Asp.Versioning;
 using FluentValidation;
-using Microsoft.ApplicationInsights.Extensibility;
-using Serilog.Events;
-using Serilog.Sinks.ApplicationInsights.TelemetryConverters;
+using Microsoft.AspNetCore.Mvc;
 using Multitenant.Api.Authorization;
 using Multitenant.Api.Configuration;
 using Multitenant.Api.Endpoints;
@@ -12,48 +9,16 @@ using Multitenant.Api.Filters;
 using Multitenant.Api.Middleware;
 using Multitenant.Api.OpenApi;
 using Multitenant.Api.RateLimiting;
-using Multitenant.Application.Common;
 using Multitenant.Application.Configuration.Web;
 using Multitenant.Application.Validation.Tenants;
 using Multitenant.Infrastructure;
 using Multitenant.Infrastructure.Persistence;
 using Scalar.AspNetCore;
 using Serilog;
-using Serilog.Formatting.Compact;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Host.UseSerilog((context, services, loggerConfiguration) =>
-{
-    loggerConfiguration
-        .ReadFrom.Configuration(context.Configuration)
-        .ReadFrom.Services(services)
-        .Enrich.FromLogContext()
-        .Enrich.WithProperty("Application", "Multitenant.Api");
-
-    if (context.HostingEnvironment.IsDevelopment())
-    {
-        loggerConfiguration.WriteTo.Console(
-            outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj} {Properties:j}{NewLine}{Exception}",
-            formatProvider: CultureInfo.InvariantCulture);
-    }
-    else
-    {
-        // Structured JSON lines are what Azure Log Analytics / Application Insights
-        // (and AWS CloudWatch when shipped through a log agent) consume natively.
-        loggerConfiguration.WriteTo.Console(new CompactJsonFormatter());
-
-        var connectionString = context.Configuration["Serilog:AzureMonitor:ConnectionString"];
-        if (!string.IsNullOrWhiteSpace(connectionString))
-        {
-            var telemetryConfiguration = new TelemetryConfiguration { ConnectionString = connectionString };
-            loggerConfiguration.WriteTo.ApplicationInsights(
-                telemetryConfiguration,
-                new EventTelemetryConverter(),
-                LogEventLevel.Information);
-        }
-    }
-});
+builder.ConfigureApiSerilog();
 
 builder.Services.AddInfrastructure(builder.Configuration);
 
@@ -75,23 +40,9 @@ builder.Services
     .AddJsonOptions(options =>
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
+builder.Services.AddApiErrorContract();
 builder.Services.AddScoped<ValidationFilter>();
 builder.Services.AddValidatorsFromAssemblyContaining<OnboardTenantRequestValidator>();
-
-builder.Services.AddProblemDetails(options =>
-{
-    options.CustomizeProblemDetails = context =>
-    {
-        var httpContext = context.HttpContext;
-        context.ProblemDetails.Instance ??= httpContext.Request.Path;
-        context.ProblemDetails.Extensions.TryAdd("traceId", httpContext.TraceIdentifier);
-        context.ProblemDetails.Extensions.TryAdd(
-            "correlationId",
-            httpContext.Items[CorrelationKeys.ItemKey]);
-    };
-});
-
-builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
 builder.Services
     .AddApiVersioning(options =>
@@ -108,7 +59,6 @@ builder.Services
     .AddOpenApi(options => options.Document.AddDocumentTransformer<BearerSecuritySchemeTransformer>());
 
 builder.Services.AddAuthorization(Policies.Configure);
-
 builder.Services.AddApiRateLimiting();
 
 builder.Services.AddHealthChecks()
@@ -128,6 +78,7 @@ if (cors.AllowedOrigins.Length > 0)
 var app = builder.Build();
 
 // Fail fast if a non-development deployment leaves the wildcard host filter in place.
+// Auth:PublicBaseUrl gets the same treatment through its options validator.
 var allowedHosts = app.Configuration["AllowedHosts"];
 if (!app.Environment.IsDevelopment()
     && (string.IsNullOrWhiteSpace(allowedHosts) || allowedHosts.Trim() == "*"))

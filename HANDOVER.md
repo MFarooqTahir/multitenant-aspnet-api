@@ -12,10 +12,10 @@ It doubles as the onboarding path for a new contributor (or an AI pair).
 | --- | --- |
 | Build | `dotnet build multitenant-aspnet-api.slnx` succeeds with 0 warnings (warnings are errors) |
 | Unit tests | 40 passing |
-| Integration tests | 64 passing against Testcontainers PostgreSQL 16 |
+| Integration tests | 71 passing against Testcontainers PostgreSQL 16 |
 | API surface | Auth, tenants (onboard/current/rename/features), users, projects, tasks, health, OpenAPI |
 | Migrations | `InitialCreate` plus `TenantFeatures`, applied automatically in Development |
-| Docker | `Dockerfile` and `compose.yaml` are current; image builds |
+| Docker | `Dockerfile` and `compose.yaml` are current; `compose.demo.yaml` seeds the demo tenants; image builds in CI |
 | CI | `.github/workflows/ci.yml` builds, tests and publishes to GHCR on `main`/`master` and tags |
 
 Nothing in the working tree is intentionally half-finished. The "Known limitations and roadmap"
@@ -37,8 +37,10 @@ Read these before changing anything touching data or auth.
    `AppDbContext.CurrentTenantId` because EF caches the model per context type. A closure
    would freeze the first request's tenant for the process lifetime.
 3. **`IgnoreQueryFilters()` must be paired with an explicit `TenantId` predicate.** It appears
-   only in `AuthService`, `UserProvisioningService`, `UserService` role lookups,
-   `DatabaseInitializer` and `JwtBearerConfiguration`. Do not add it casually.
+   only in `AuthService`, `UserProvisioningService`, `JwtBearerConfiguration` and
+   `DatabaseInitializer`. The one exception is `AuthService.ConfirmEmailAsync`, which looks a
+   user up by its globally unique id because the tenant is unknown at that point; a valid
+   per-user token is still required. Do not add it casually.
 4. **Do not bypass the security-stamp check.** Access tokens are validated against the live
    user, role and security stamp on every request. Removing that makes role changes and
    logout-everywhere non-immediate.
@@ -67,6 +69,10 @@ Read these before changing anything touching data or auth.
 12. **Feature flags are per-tenant kill switches.** A key must be added to `TenantFeatureKeys`
     and have a real consumer before it is exposed; an absent row means enabled, and a disabled
     feature returns `404` with its own code (see ADR 0009).
+13. **NuGet versions live in `Directory.Packages.props`.** Central Package Management is on:
+    add a `<PackageVersion>` there and a bare `<PackageReference>` in the project. Never put a
+    `Version` attribute on a `PackageReference`; the build fails with NU1010 if a version is
+    missing.
 
 ---
 
@@ -94,6 +100,9 @@ dotnet run --project src/Multitenant.Api --launch-profile http
 
 # Run the whole stack
 docker compose up --build
+
+# Run the demo stack: seeds acme/globex (local only, never for a shared deployment)
+docker compose -f compose.yaml -f compose.demo.yaml up --build
 
 # Formatting / style check
 dotnet format multitenant-aspnet-api.slnx --verify-no-changes
@@ -135,6 +144,7 @@ cross-platform.
 | Test harness | `tests/Multitenant.IntegrationTests/Infrastructure/IntegrationHarness.cs` |
 | Test scenarios/helpers | `tests/Multitenant.IntegrationTests/Infrastructure/Scenarios.cs` |
 | Docs | `README.md` (humans), `HANDOVER.md` (agents), `docs/architecture.md`, `docs/adr/` |
+| NuGet versions | `Directory.Packages.props` (CPM; no `Version` on project references) |
 
 ---
 
@@ -164,6 +174,11 @@ cross-platform.
 
 - **2FA setup rotates the security stamp** (`ResetAuthenticatorKeyAsync`). A client must log in
   again between `/auth/2fa/setup` and `/auth/2fa/enable`. The test documents this.
+- **Both factors share one lockout.** Five bad TOTP or recovery codes lock the account just
+  like five bad passwords, and a locked account cannot finish a challenge even with the
+  correct code. Logout revokes only a refresh token owned by the caller.
+- **`GET /projects/{id}/tasks` returns 404** for an unknown or cross-tenant project id instead
+  of an empty page; the list is not a way to probe for another tenant's project.
 - **Registration does not confirm email, but it does send the link.** `POST /auth/register`
   creates the user with `EmailConfirmed=false` and sends the confirmation email, like
   `/users` and onboarding. They can log in unless `Identity:RequireConfirmedEmail=true`.
@@ -181,9 +196,13 @@ cross-platform.
 - **Role changes keep refresh tokens valid**, so the next refresh issues a token with the new
   role. Access tokens are invalidated immediately by the security-stamp bump.
 - **Login is by tenant slug + email**, not email alone.
-- **Status codes**: validation 400 (`validation_failed`), auth 401, role 403, missing/foreign
-  resource 404, duplicates 409, rate limit 429 (`rate_limited`), disabled feature 404
-  (`feature_disabled`).
+- **Status codes**: validation 400 (`validation_failed`, including model-binding failures),
+  auth 401, role 403, missing/foreign resource 404, duplicates 409, rate limit 429
+  (`rate_limited`), disabled feature 404 (`feature_disabled`).
+- **Rate limiting has two budgets.** Login, 2FA verification, confirmation resend and
+  onboarding use the strict per-IP `auth` policy (10/min by default). Refresh and registration
+  stay on the global budget (per-IP before a tenant is known, per-tenant afterwards) so shared
+  NATs and routine token refreshes are not throttled by a login-sized bucket.
 - **Feature switches are per tenant and default to enabled.** `GET /tenants/current/features`
   reports the effective value of every whitelisted key; `PUT /tenants/current/features/{key}` is
   Owner-only and rejects unknown keys with `404 unknown_feature`. Disabling `task_assignment`
@@ -198,15 +217,18 @@ cross-platform.
   no-op `202` in that mode. The emailed link puts the token in the URL fragment and the page
   POSTs `{ "userId", "token" }` to `/auth/confirm-email` (never a query string).
 - **Security hardening** lives in startup and middleware: `AllowedHosts` must be explicit
-  outside Development (startup throws on `*`), CORS allows only standard headers/methods with
+  outside Development (startup throws on `*`), `Auth:PublicBaseUrl` must be HTTPS or loopback
+  HTTP, CORS allows only standard headers/methods with
   credentials disabled, `UseHttpsRedirection` is enabled, client correlation ids are restricted
   to `[A-Za-z0-9._-]`, confirmation tokens are redacted in `LoggingEmailSender`, and SMTP with
-  `UseStartTls=false` logs a plaintext warning.
+  `UseStartTls=false` logs a plaintext warning. `.dockerignore` keeps local settings files out
+  of the image.
 - **Validation is fail-closed.** `ValidationFilterAssertion` runs at startup and throws if any
   complex action parameter lacks an `IValidator<T>`; add a validator when adding an endpoint.
 - **Provisioning and demo seeding are transactional.** `UserProvisioningService` joins a
   caller's transaction when one exists (onboarding) and owns one otherwise; the initializer
-  wraps the whole demo tenant seed so a partial failure rolls back. A concurrent duplicate
+  wraps the whole demo tenant seed so a partial failure rolls back. Role seeding tolerates
+  the duplicate-key race when two replicas start together. A concurrent duplicate
   registration that beats the pre-check is mapped from the unique-index violation to the same
   `409 email_taken` instead of a `500`.
 - **The database refuses half-set assignees.** `CK_WorkItems_AssigneeTenant` requires both
@@ -242,6 +264,9 @@ cross-platform.
 
 - Container listens on `8080`, non-root, plain HTTP. Terminate TLS at the proxy/ingress; the
   app enables `UseHttpsRedirection`, so forwarded scheme headers must be configured.
+- `compose.yaml` runs the API as `Production` (JSON logs, no exception detail in 500s);
+  `compose.demo.yaml` is a local-only overlay that enables demo seeding. Neither is a
+  production deployment recipe.
 - Production configuration:
   - `Database:AutoMigrate=false`, `Database:SeedDemoData=false`
   - `AllowedHosts` set to the explicit public host name(s); startup fails on `*` outside Development
@@ -273,6 +298,11 @@ cross-platform.
 7. Optional caching of the per-request user/security-stamp lookup.
 8. Introduce a platform-administrator role if tenant listing, deactivation and reactivation are
    ever needed; today the API is intentionally tenant-scoped only (ADR 0010).
+9. Revisit .NET 11 when `Npgsql.EntityFrameworkCore.PostgreSQL` 11.0.0 and `Asp.Versioning` 11
+   ship stable. Today Npgsql is `11.0.0-rc.3` (pins EF Core to the RC, conflicting with stable
+   Identity 11) and `Asp.Versioning.OpenApi` 10.2.3 requires `Microsoft.OpenApi < 3.0.0` while
+   ASP.NET Core OpenAPI 11 requires `>= 3.11.0`. The project deliberately stays on .NET 10 LTS,
+   which the plan calls for, rather than shipping a release-candidate data stack.
 
 ---
 
@@ -300,11 +330,12 @@ cross-platform.
 1. `git status` — expect a clean tree.
 2. `dotnet build multitenant-aspnet-api.slnx` — expect 0 warnings.
 3. `dotnet test tests/Multitenant.UnitTests` — expect 40 passing.
-4. Start Docker, then `dotnet test tests/Multitenant.IntegrationTests` — expect 64 passing.
-5. `cp .env.example .env` and adjust `JWT_SIGNING_KEY`/`POSTGRES_PASSWORD`. Demo accounts are
-   opt-in: set `SEED_DEMO_DATA=true` and a `DEMO_PASSWORD` of your choice, then
-   `docker compose up --build`, open <http://localhost:8080/scalar>, log in as
-   `owner@acme.test` with that password. To run with `dotnet run` instead, first create the
+4. Start Docker, then `dotnet test tests/Multitenant.IntegrationTests` — expect 71 passing.
+5. `cp .env.example .env` and adjust `JWT_SIGNING_KEY`/`POSTGRES_PASSWORD`. For the demo
+   accounts, use the local-only overlay: `docker compose -f compose.yaml -f compose.demo.yaml
+   up --build`, open <http://localhost:8080/scalar>, and log in as `acme`/`owner@acme.test`
+   with `Demo123!Passw0rd`. Without the overlay, set `SEED_DEMO_DATA=true` and a
+   `DEMO_PASSWORD` of your choice yourself. To run with `dotnet run` instead, first create the
    git-ignored `src/Multitenant.Api/appsettings.Development.json` (see README `Configuration`)
    or export the equivalent `ConnectionStrings__Postgres`, `Jwt__SigningKey`,
    `Demo__Password`, `Database__AutoMigrate` and `Database__SeedDemoData` variables.

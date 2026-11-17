@@ -21,4 +21,12 @@ public sealed class AuthOptions
 
     [Range(1, 30)]
     public int TwoFactorChallengeMinutes { get; set; } = 5;
+
+    /// <summary>
+    /// True when the base URL cannot leak a confirmation token in clear text:
+    /// HTTPS anywhere, or plain HTTP on a loopback host for local development.
+    /// </summary>
+    public bool UsesSecureBaseUrl() =>
+        Uri.TryCreate(PublicBaseUrl, UriKind.Absolute, out var uri)
+        && (uri.Scheme == Uri.UriSchemeHttps || uri.IsLoopback);
 }

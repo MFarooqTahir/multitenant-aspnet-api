@@ -32,6 +32,9 @@ public static class JwtBearerConfiguration
             ValidAudience = jwt.Audience,
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.SigningKey)),
+            // Pin the algorithm: only HMAC-SHA256 tokens signed with this key are
+            // accepted, so a token cannot ask the handler to switch algorithms.
+            ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromSeconds(30),
             NameClaimType = AuthClaims.Subject,

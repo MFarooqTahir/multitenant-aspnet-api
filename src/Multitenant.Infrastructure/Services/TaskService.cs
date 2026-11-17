@@ -9,11 +9,14 @@ using Multitenant.Infrastructure.Persistence;
 
 namespace Multitenant.Infrastructure.Services;
 
+/// <summary>
+/// Tasks of the current tenant. Reads rely on the EF query filter; assignment is
+/// checked against the tenant's feature switch and against a tenant-scoped user lookup.
+/// </summary>
 public sealed class TaskService(
     AppDbContext dbContext,
     ITenantContext tenantContext,
-    ITenantFeatureService tenantFeatureService,
-    TimeProvider timeProvider) : ITaskService
+    ITenantFeatureService tenantFeatureService) : ITaskService
 {
     private static readonly HashSet<string> SortFields = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -90,6 +93,25 @@ public sealed class TaskService(
         return new PagedResult<TaskResponse>(items, page, pageSize, totalCount);
     }
 
+    public async Task<PagedResult<TaskResponse>> ListForProjectAsync(
+        Guid projectId,
+        TaskQuery query,
+        CancellationToken cancellationToken)
+    {
+        // The query filter scopes this to the caller's tenant, so a project id from
+        // another tenant resolves to no row and returns 404 like every other read.
+        var projectExists = await dbContext.Projects
+            .AnyAsync(x => x.Id == projectId, cancellationToken);
+
+        if (!projectExists)
+        {
+            throw new NotFoundException("Project not found.");
+        }
+
+        query.ProjectId = projectId;
+        return await ListAsync(query, cancellationToken);
+    }
+
     public async Task<TaskResponse> GetAsync(Guid id, CancellationToken cancellationToken)
     {
         var task = await dbContext.WorkItems
@@ -129,8 +151,6 @@ public sealed class TaskService(
             AssigneeUserId = request.AssigneeUserId,
             AssigneeTenantId = request.AssigneeUserId is null ? null : tenantId,
             DueDate = request.DueDate,
-            CreatedAtUtc = timeProvider.GetUtcNow(),
-            UpdatedAtUtc = timeProvider.GetUtcNow(),
         };
 
         dbContext.WorkItems.Add(task);

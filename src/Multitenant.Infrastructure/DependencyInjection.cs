@@ -146,11 +146,15 @@ public static class DependencyInjection
         services.AddOptions<AuthOptions>()
             .Bind(configuration.GetSection(AuthOptions.SectionName))
             .ValidateDataAnnotations()
+            .Validate(
+                options => options.UsesSecureBaseUrl(),
+                "Auth:PublicBaseUrl must be an HTTPS URL, or plain HTTP on a loopback host for local development.")
             .ValidateOnStart();
 
         services.AddOptions<IdentityFeatureOptions>()
             .Bind(configuration.GetSection(IdentityFeatureOptions.SectionName))
-            .ValidateDataAnnotations();
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         services.AddOptions<EmailOptions>()
             .Bind(configuration.GetSection(EmailOptions.SectionName))
@@ -166,17 +170,28 @@ public static class DependencyInjection
 
         services.AddOptions<RateLimitingOptions>()
             .Bind(configuration.GetSection(RateLimitingOptions.SectionName))
-            .ValidateDataAnnotations();
+            .ValidateDataAnnotations()
+            // DataAnnotations does not recurse into the nested policy objects.
+            .Validate(
+                options => IsValidPolicy(options.Tenant) && IsValidPolicy(options.Auth),
+                "RateLimiting permit limits and window seconds must be positive.")
+            .ValidateOnStart();
 
         services.AddOptions<DatabaseOptions>()
-            .Bind(configuration.GetSection(DatabaseOptions.SectionName));
+            .Bind(configuration.GetSection(DatabaseOptions.SectionName))
+            .ValidateOnStart();
 
         services.AddOptions<DemoOptions>()
-            .Bind(configuration.GetSection(DemoOptions.SectionName));
+            .Bind(configuration.GetSection(DemoOptions.SectionName))
+            .ValidateOnStart();
 
         services.AddOptions<CorsOptions>()
-            .Bind(configuration.GetSection(CorsOptions.SectionName));
+            .Bind(configuration.GetSection(CorsOptions.SectionName))
+            .ValidateOnStart();
     }
+
+    private static bool IsValidPolicy(RateLimitPolicyOptions policy) =>
+        policy.PermitLimit > 0 && policy.WindowSeconds > 0;
 
     private static bool IsKnownEmailProvider(string provider) =>
         string.Equals(provider, "Logging", StringComparison.OrdinalIgnoreCase)

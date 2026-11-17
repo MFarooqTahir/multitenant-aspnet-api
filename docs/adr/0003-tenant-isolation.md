@@ -44,5 +44,7 @@ every authenticated request (see ADR 0004), so changes take effect immediately.
   boundaries.
 - Queries that intentionally cross tenants (login, refresh, security-stamp validation) use
   `IgnoreQueryFilters()` **plus** an explicit `TenantId` predicate. This is a deliberate,
-  greppable exception.
+  greppable exception. Email confirmation is the one case without a tenant predicate: it looks
+  the user up by its globally unique id because the tenant is unknown before the row is found,
+  and still requires a valid per-user token.
 - A future move to database-per-tenant would keep the Application contracts unchanged.

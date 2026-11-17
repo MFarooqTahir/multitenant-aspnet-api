@@ -29,17 +29,15 @@ public sealed class TasksController(ITaskService taskService) : ControllerBase
     public async Task<ActionResult<TaskResponse>> Get(Guid id, CancellationToken cancellationToken) =>
         Ok(await taskService.GetAsync(id, cancellationToken));
 
-    /// <summary>Lists the tasks of one project.</summary>
+    /// <summary>Lists the tasks of one project. An unknown or cross-tenant project id returns 404.</summary>
     [HttpGet("projects/{projectId:guid}/tasks")]
     [ProducesResponseType<PagedResult<TaskResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PagedResult<TaskResponse>>> ListForProject(
         Guid projectId,
         [FromQuery] TaskQuery query,
-        CancellationToken cancellationToken)
-    {
-        query.ProjectId = projectId;
-        return Ok(await taskService.ListAsync(query, cancellationToken));
-    }
+        CancellationToken cancellationToken) =>
+        Ok(await taskService.ListForProjectAsync(projectId, query, cancellationToken));
 
     /// <summary>Creates a task in a project. Any member of the tenant may create tasks.</summary>
     [HttpPost("projects/{projectId:guid}/tasks")]

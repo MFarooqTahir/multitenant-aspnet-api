@@ -46,7 +46,6 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     /// </summary>
     [HttpPost("register")]
     [Authorize(Policy = Policies.ManageTenant)]
-    [EnableRateLimiting(RateLimitingSetup.AuthPolicy)]
     [ProducesResponseType<UserResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
@@ -60,7 +59,6 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     /// <summary>Exchanges a refresh token for a new token pair (rotation + reuse detection).</summary>
     [HttpPost("refresh")]
     [AllowAnonymous]
-    [EnableRateLimiting(RateLimitingSetup.AuthPolicy)]
     [ProducesResponseType<AuthTokens>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<AuthTokens>> Refresh(

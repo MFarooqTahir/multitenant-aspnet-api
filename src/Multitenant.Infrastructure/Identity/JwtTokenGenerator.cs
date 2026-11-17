@@ -108,6 +108,7 @@ public sealed class JwtTokenGenerator(
         ValidAudience = _jwt.Audience,
         ValidateIssuerSigningKey = true,
         IssuerSigningKey = SigningKey(),
+        ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
         ValidateLifetime = true,
         ClockSkew = TimeSpan.FromSeconds(30),
         NameClaimType = AuthClaims.Subject,

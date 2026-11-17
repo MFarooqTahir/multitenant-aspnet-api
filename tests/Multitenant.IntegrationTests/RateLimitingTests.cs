@@ -94,6 +94,34 @@ public sealed class RateLimitingTests : IntegrationTestBase
     }
 
     [Fact]
+    public async Task RefreshUsesTheGlobalBudgetNotTheCredentialBudget()
+    {
+        // Create the session against the unrestricted fixture: onboarding and login
+        // both consume the strict credential budget.
+        AuthTokens tokens;
+
+        using (var setupClient = CreateClient())
+        {
+            tokens = await Scenarios.OnboardAndLoginAsync(setupClient, "rate-refresh", "refresh@acme.test");
+        }
+
+        await using var factory = Harness.CreateFactory(configuration =>
+        {
+            configuration["RateLimiting:Auth:PermitLimit"] = "1";
+            configuration["RateLimiting:Auth:WindowSeconds"] = "60";
+            configuration["RateLimiting:Tenant:PermitLimit"] = "1000";
+        });
+        using var client = factory.CreateClient();
+
+        // A routine token refresh must not be squeezed by the login-sized bucket.
+        var refreshed = await client.PostApi(
+            "/api/v1/auth/refresh",
+            new RefreshTokenRequest(tokens.RefreshToken));
+
+        Assert.Equal(HttpStatusCode.OK, refreshed.StatusCode);
+    }
+
+    [Fact]
     public async Task HealthChecksAreNotRateLimited()
     {
         await using var factory = Harness.CreateFactory(configuration =>

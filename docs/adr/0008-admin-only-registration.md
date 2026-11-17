@@ -35,5 +35,7 @@ Require the `manage_tenant` policy (Owner or Admin) on `POST /auth/register`:
 - `POST /auth/register` and `POST /users` now overlap: the former is the fixed-role shortcut for
   adding a Member, the latter is the full admin surface. They share `IUserProvisioningService`,
   so creation rules stay in one place.
-- The endpoint keeps the IP rate limiter as defence in depth, even though it is authenticated.
+- The endpoint is covered by the global per-tenant budget rather than the strict per-IP
+  credential bucket: an authenticated admin action must not compete with logins for a shared
+  office-NAT allowance.
 - Tests assert the new behaviour: anonymous `401`, Member `403`, cross-tenant slug `403`.

@@ -4,7 +4,7 @@
 ![ASP.NET Core](https://img.shields.io/badge/ASP.NET%20Core-10-512BD4)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791)
 ![EF Core](https://img.shields.io/badge/EF%20Core-10-512BD4)
-![Tests](https://img.shields.io/badge/tests-40%20unit%20%2B%2064%20integration-2ea44f)
+![Tests](https://img.shields.io/badge/tests-40%20unit%20%2B%2071%20integration-2ea44f)
 ![CI](https://github.com/MFarooqTahir/multitenant-aspnet-api/actions/workflows/ci.yml/badge.svg)
 ![Licence](https://img.shields.io/badge/licence-MIT-blue)
 
@@ -26,8 +26,9 @@ of it is tested and operated.
 *Authenticated as the `globex` owner and requesting a project that belongs to `acme`: the API
 returns `404` and never confirms that the resource exists in another tenant.*
 
-Start the seeded stack (see [Quick start](#quick-start)), then create a project as the owner of
-`acme` and ask for that same id as the owner of `globex`:
+Start the demo stack with the one-command overlay (see [One-command demo](#one-command-demo)),
+then create a project as the owner of `acme` and ask for that same id as the owner of
+`globex`:
 
 ```bash
 # 1. Create a project as the acme owner. Note the id in the response.
@@ -100,7 +101,7 @@ dotnet test tests/Multitenant.IntegrationTests --filter "FullyQualifiedName~Tena
 | Per-tenant feature flags with whitelisted keys | [ADR 0009](docs/adr/0009-per-tenant-feature-flags.md), `TenantFeatureTests` |
 | Tenant rename with an immutable login slug | [ADR 0010](docs/adr/0010-tenant-lifecycle-scope.md), `TenantManagementTests` |
 | FluentValidation, fail-closed at startup | `Validation/`, `ValidationFilterAssertion` |
-| 104 tests: 40 unit + 64 integration, Testcontainers against real PostgreSQL | [Testing](#testing) |
+| 111 tests: 40 unit + 71 integration, Testcontainers against real PostgreSQL | [Testing](#testing) |
 | Clean layering, one-way dependencies, no business logic in controllers | [ADR 0002](docs/adr/0002-layered-solution.md) |
 | Docker multi-stage image, compose stack, CI publishing to GHCR | [Operations](#operations), `.github/workflows/ci.yml` |
 | Correlation ids, Serilog JSON logging, optional App Insights | [ADR 0007](docs/adr/0007-observability.md) |
@@ -135,6 +136,10 @@ docker compose up -d postgres
 dotnet run --project src/Multitenant.Api --launch-profile http
 ```
 
+`.env.example` already uses the development database password that the sample
+`appsettings.Development.json` connects with. If you change `POSTGRES_PASSWORD`, change the
+connection string to match; the API and the container must agree.
+
 Then open <http://localhost:5270/scalar> and log in as `owner@acme.test` / `Demo123!Passw0rd`.
 
 What happens on first start:
@@ -157,9 +162,25 @@ docker compose up --build
 ```
 
 The API waits for PostgreSQL, then listens on <http://localhost:8080> (Scalar at
-<http://localhost:8080/scalar>). Demo seeding is opt-in: set `SEED_DEMO_DATA=true` and
-`DEMO_PASSWORD=<your password>` in `.env`. Without them the database starts clean and the
-first tenant is created with `POST /api/v1/tenants/onboard`.
+<http://localhost:8080/scalar>). The compose stack runs as `Production` by default so a
+`500` never echoes exception detail and the console is JSON; set
+`ASPNETCORE_ENVIRONMENT=Development` in `.env` for readable logs. Demo seeding is opt-in:
+set `SEED_DEMO_DATA=true` and `DEMO_PASSWORD=<your password>` in `.env`. Without them the
+database starts clean and the first tenant is created with `POST /api/v1/tenants/onboard`.
+
+### One-command demo
+
+A reviewer who wants the isolation proof in about a minute can add the demo overlay, which
+seeds the two tenants without changing the safe default:
+
+```bash
+cp .env.example .env
+docker compose -f compose.yaml -f compose.demo.yaml up --build
+```
+
+Then log in as `acme`/`owner@acme.test` and `globex`/`owner@globex.test` with
+`Demo123!Passw0rd`, create a project as one and request its id as the other. The overlay is
+local-only; never reuse it for a shared deployment.
 
 ### Demo accounts
 
@@ -217,8 +238,11 @@ One database, many tenants. No single layer is trusted to be the only one:
 5. **The API hides existence.** Cross-tenant ids return `404`, never `403`, so the API does not
    confirm that a resource exists in another tenant.
 
-Every deliberate `IgnoreQueryFilters()` call is greppable and paired with an explicit `TenantId`
-predicate (login, refresh, security-stamp validation, seeding).
+Every deliberate `IgnoreQueryFilters()` call is greppable and stays paired with an explicit
+`TenantId` predicate wherever the tenant is known (login, refresh, security-stamp validation,
+seeding). The one exception is `ConfirmEmailAsync`, which looks the user up by its globally
+unique id because the tenant is not known before the row is found; a valid per-user token is
+still required.
 
 ### Authentication and sessions
 
@@ -233,6 +257,9 @@ predicate (login, refresh, security-stamp validation, seeding).
 - **Rotation with reuse detection** — refreshing revokes the old token and issues a replacement
   in the same family. Presenting an already-revoked token is treated as theft: the whole family
   is revoked and the request fails.
+- **One lockout covers both factors** — the password and the TOTP/recovery-code check share
+  Identity's counters, so a locked account cannot finish a 2FA challenge even with the correct
+  code. Logout only revokes a token owned by the caller.
 - **Single session by default** — `Auth:SingleSessionPerUser=true` rotates the stamp on login
   and revokes all other refresh tokens, so only the newest session survives. Set `false` for
   multi-device use.
@@ -288,7 +315,7 @@ and `correlationId`:
 
 | Status | Codes (examples) | Meaning |
 | --- | --- | --- |
-| 400 | `validation_failed` | Request failed FluentValidation |
+| 400 | `validation_failed` | Request failed FluentValidation **or** model binding (malformed JSON, unparsable query value) |
 | 401 | `invalid_refresh_token`, `invalid_two_factor_challenge` | Bad or expired credentials |
 | 403 | `email_not_confirmed`, `role_not_allowed`, `tenant_mismatch`, `self_role_change` | Authenticated but not allowed |
 | 404 | `feature_disabled`, missing/foreign resource | Unknown or cross-tenant target |
@@ -344,7 +371,7 @@ version at `/openapi/v1.json`; interactive docs at `/scalar`.
 | --- | --- | --- | --- |
 | POST | `/auth/login` | anonymous, IP-limited | Password login; returns tokens or a 2FA challenge |
 | POST | `/auth/register` | Owner/Admin | Add a `Member` to your own tenant (`403 tenant_mismatch` otherwise) |
-| POST | `/auth/refresh` | anonymous, IP-limited | Rotate the refresh token, issue a new pair |
+| POST | `/auth/refresh` | anonymous, global budget | Rotate the refresh token, issue a new pair |
 | POST | `/auth/logout` | bearer | Revoke one refresh token |
 | POST | `/auth/logout-all` | bearer | Revoke all sessions and access tokens |
 | POST | `/auth/confirm-email` | anonymous | Complete confirmation (`{ userId, token }` body) |
@@ -387,7 +414,7 @@ version at `/openapi/v1.json`; interactive docs at `/scalar`.
 | DELETE | `/projects/{id}` | Owner/Admin | Delete (cascades to tasks) |
 | GET | `/tasks` | member | Paged list (`search`, `status`, `priority`, `projectId`, `assigneeUserId`, `dueBefore`, `dueAfter`, `sort`) |
 | GET | `/tasks/{id}` | member | One task |
-| GET | `/projects/{projectId}/tasks` | member | Tasks of one project |
+| GET | `/projects/{projectId}/tasks` | member | Tasks of one project (unknown or cross-tenant id → `404`) |
 | POST | `/projects/{projectId}/tasks` | member | Create a task (any member) |
 | PUT | `/tasks/{id}` | member | Update a task |
 | DELETE | `/tasks/{id}` | Owner/Admin | Delete a task |
@@ -451,12 +478,16 @@ A minimal local `appsettings.Development.json` for `dotnet run`:
 {
   "ConnectionStrings": { "Postgres": "Host=localhost;Port=5432;Database=multitenantDb;Username=multitenant-DbUser;Password=multitenant-DbPassword123!" },
   "Jwt": { "SigningKey": "<32+ character random string>" },
+  "Auth": { "PublicBaseUrl": "http://localhost:5270" },
   "Demo": { "Password": "Demo123!Passw0rd" },
   "Database": { "AutoMigrate": true, "SeedDemoData": true }
 }
 ```
 
-These values are for local development only; production must come from a secret store.
+`Auth:PublicBaseUrl` must match the URL the API actually listens on, or confirmation links
+point at the wrong port. Outside development the URL must be HTTPS (plain HTTP is accepted
+only on a loopback host). These values are for local development only; production must come
+from a secret store.
 
 ### Migrations
 
@@ -482,7 +513,7 @@ API's `appsettings*.json`, then falls back to the Development connection string.
 
 ## Testing
 
-**104 tests: 40 unit + 64 integration.** No mocks of the data layer and no in-memory database —
+**111 tests: 40 unit + 71 integration.** No mocks of the data layer and no in-memory database —
 integration tests run against a real PostgreSQL 16 container (Testcontainers).
 
 ```bash
@@ -498,20 +529,25 @@ offset overflow, claim generation, 2FA challenge validation and refresh-token ha
 
 **Integration tests** boot the real API via `WebApplicationFactory` and cover:
 
-- tenant isolation for projects, tasks and users, including cross-tenant writes;
+- tenant isolation for projects, tasks and users, including cross-tenant writes and
+  project-scoped task lists;
 - cross-tenant task-assignee rejection at the database level, including the NULL-column bypass;
 - refresh rotation, reuse detection, family revocation, expiry and concurrent rotation;
+- logout scoping (a caller cannot revoke another user's refresh token);
 - single-session enforcement and the multi-device path (`SingleSessionPerUser=false`);
 - role-change invalidation and refreshed role claims;
 - logout, logout-all, and lockout after repeated bad passwords;
 - registration (admin-only, cross-tenant slug rejection), duplicate emails, the role matrix;
 - email confirmation end-to-end with a captured email sender, and resend behaviour;
-- two-factor enable, login challenge, single-use recovery codes and disable;
+- two-factor enable, login challenge, single-use recovery codes, disable and lockout;
 - paging, sorting, search and status/priority/date filters;
+- model-binding and FluentValidation failures sharing one `validation_failed` contract;
 - per-tenant feature switches, including the assignment block and tenant-scoped overrides;
 - tenant rename permissions and the immutable slug;
-- per-IP and per-tenant rate limiting, including health-endpoint exemptions;
-- startup configuration validation (JWT key, email provider, forwarded proxies);
+- per-IP, per-tenant and session-maintenance rate-limiting behaviour, including
+  health-endpoint exemptions;
+- startup configuration validation (JWT key, email provider, forwarded proxies, HTTPS
+  public base URL);
 - health checks, OpenAPI (including the bearer scheme), 404/405 handling, correlation ids
   and the problem-details shape.
 
@@ -534,6 +570,10 @@ about 20 seconds once the image is cached.
   `POSTGRES_PASSWORD` for anything shared.
 - `JWT_SIGNING_KEY` is required by compose for **every** command (compose validates the whole
   file, even when you only start PostgreSQL). Failing fast beats starting with an empty key.
+- `compose.yaml` defaults `ASPNETCORE_ENVIRONMENT` to `Production`; `compose.demo.yaml` is a
+  local-only overlay that enables demo seeding with a known password.
+- `.dockerignore` keeps `.env` and `appsettings.Development.json` out of the build context, so
+  local credentials are never baked into an image layer.
 
 ### Production checklist
 
@@ -552,8 +592,9 @@ about 20 seconds once the image is cached.
 
 `.github/workflows/ci.yml`:
 
-1. **build-test** — restore, Release build, unit tests, integration tests on GitHub-hosted
-   Ubuntu runners (Docker for Testcontainers), TRX artefacts uploaded.
+1. **build-test** — restore (with the NuGet cache), Release build, unit tests, integration tests
+   on GitHub-hosted Ubuntu runners (Docker for Testcontainers), a container-image build so a
+   broken Dockerfile fails the PR, and TRX artefacts uploaded.
 2. **publish-image** — on pushes to `main`/`master` and `v*.*.*` tags, builds and pushes
    `ghcr.io/<owner>/<repo>` with branch, SHA, semver and `latest` (default branch) tags.
 
@@ -590,6 +631,24 @@ permissions (`packages: write`) or a `CR_PAT`.
 | [0008](docs/adr/0008-admin-only-registration.md) | Registration is a tenant-admin action |
 | [0009](docs/adr/0009-per-tenant-feature-flags.md) | Per-tenant feature flags as kill switches |
 | [0010](docs/adr/0010-tenant-lifecycle-scope.md) | Tenant lifecycle stays tenant-scoped |
+| [0011](docs/adr/0011-central-package-management.md) | Central Package Management for NuGet versions |
+| [0012](docs/adr/0012-dotnet-version-target.md) | Stay on .NET 10 LTS until the providers ship .NET 11 |
+
+### Toolchain: .NET 10 LTS today, .NET 11 when the providers catch up
+
+The project targets **.NET 10 LTS**, the current long-term-support release the plan asks for.
+.NET 11 is available, but a migration is blocked by two dependencies that have no stable
+.NET 11 release yet:
+
+| Dependency | Latest stable | Why it blocks the move |
+| --- | --- | --- |
+| `Npgsql.EntityFrameworkCore.PostgreSQL` | `10.0.3` | The 11.0.0 line exists only as `rc.3`, and it pins `Microsoft.EntityFrameworkCore` to `11.0.0-rc.3`; ASP.NET Core Identity 11 requires the stable `11.0.0`, so restore fails with NU1107. |
+| `Asp.Versioning.OpenApi` | `10.2.3` | It requires `Microsoft.OpenApi < 3.0.0`, while `Microsoft.AspNetCore.OpenApi` 11 requires `Microsoft.OpenApi >= 3.11.0` (NU1608). |
+
+Moving today would mean a release-candidate data stack plus replacing the versioned
+OpenAPI integration. That is the wrong trade for a portfolio project: reviewers read "RC
+database provider". Revisit when Npgsql 11.0.0 and Asp.Versioning 11 ship; see
+[ADR 0012](docs/adr/0012-dotnet-version-target.md).
 
 ### What changes at 10x scale
 
@@ -611,11 +670,14 @@ The design is deliberately single-node and single-database today:
 
 ```text
 .
-├── .github/workflows/ci.yml           build, test, publish to GHCR
+├── .github/workflows/ci.yml           build, test, build image, publish to GHCR
+├── .dockerignore                      keeps local secrets out of the image
 ├── .env.example                       compose environment template
 ├── README.md                          product, API and setup guide
 ├── HANDOVER.md                        engineering notes for contributors and agents
 ├── compose.yaml                       PostgreSQL + API for local runs
+├── compose.demo.yaml                  local-only demo overlay (seeds acme/globex)
+├── Directory.Packages.props           central NuGet versions (CPM)
 ├── Directory.Build.props              shared compiler/analyser settings
 ├── global.json                        SDK pin
 ├── multitenant-aspnet-api.slnx
@@ -646,8 +708,10 @@ The design is deliberately single-node and single-database today:
 
 **Conventions:** one public type per file, folders describe a concern, namespaces mirror the
 folder tree, interfaces live in `Application/Abstractions` and implementations in
-`Infrastructure`. `TreatWarningsAsErrors=true` with `AnalysisLevel=latest-recommended` — the
-build is warning-free and `dotnet format --verify-no-changes` is part of the bar.
+`Infrastructure`. NuGet versions are managed centrally in `Directory.Packages.props` (CPM), so
+a project reference never carries a `Version` attribute. `TreatWarningsAsErrors=true` with
+`AnalysisLevel=latest-recommended` — the build is warning-free and
+`dotnet format --verify-no-changes` is part of the bar.
 
 ---
 

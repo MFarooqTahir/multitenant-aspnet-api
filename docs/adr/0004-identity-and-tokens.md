@@ -18,7 +18,11 @@ providers) but **not** `MapIdentityApi`. Authentication is a hand-written JWT fl
   `tenant_slug`, `role`, `email`, `name`, `sstamp` and `jti`. Issued only after Identity has
   verified the password (and the second factor when enabled).
 - **Refresh token** — 256 bits of CSPRNG output, URL-safe, stored only as a SHA-256 hash. It
-  expires after 30 days and belongs to a *family*.
+  expires after 30 days and belongs to a *family*. Logout only revokes a token owned by the
+  caller, so an authenticated user cannot end someone else's session.
+- **Lockout covers the second factor** — the same Identity counters protect the password and
+  the TOTP/recovery-code check, and a locked account cannot complete a 2FA challenge even
+  with the correct code.
 - **Rotation** — refreshing marks the old token revoked and issues a replacement in the same
   family. Presenting an already-revoked token is treated as theft: the whole family is
   revoked and the request fails.

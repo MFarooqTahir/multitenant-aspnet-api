@@ -1,17 +1,18 @@
 @host = http://localhost:5270
 @api = {{host}}/api/v1
 
-# Seeded demo tenant. Password: Demo123!Passw0rd
+# Seeded demo tenant (see README "Demo accounts"). Password: Demo123!Passw0rd
 @tenantSlug = acme
 @email = owner@acme.test
 @password = Demo123!Passw0rd
 
-# Set from the login/register responses.
-@accessToken = paste-access-token-here
-@refreshToken = paste-refresh-token-here
-@projectId = paste-project-id-here
-@taskId = paste-task-id-here
-@userId = paste-user-id-here
+# Filled from earlier responses, so a run from top to bottom needs no copy/paste.
+# Run "Log in to a tenant" first; the rest of the file follows it.
+@accessToken = {{login.response.body.$.accessToken}}
+@refreshToken = {{login.response.body.$.refreshToken}}
+@userId = {{createUser.response.body.$.id}}
+@projectId = {{createProject.response.body.$.id}}
+@taskId = {{createTask.response.body.$.id}}
 
 ### Health (live / ready / full)
 GET {{host}}/health/live
@@ -155,6 +156,7 @@ GET {{api}}/users/me
 Authorization: Bearer {{accessToken}}
 
 ### Create a user (Owner/Admin)
+# @name createUser
 POST {{api}}/users
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json

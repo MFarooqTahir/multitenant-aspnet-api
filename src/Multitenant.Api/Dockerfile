@@ -9,8 +9,8 @@ ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 
 # Build metadata must be present before restore so the SDK sees the same
-# target framework and analyser settings as a local build.
-COPY Directory.Build.props global.json ./
+# target framework, central package versions and analyser settings as a local build.
+COPY Directory.Build.props Directory.Packages.props global.json ./
 COPY src/ src/
 
 RUN dotnet restore "src/Multitenant.Api/Multitenant.Api.csproj"

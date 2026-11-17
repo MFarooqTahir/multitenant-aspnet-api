@@ -30,7 +30,9 @@
       postgres:
         condition: service_healthy
     environment:
-      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      # Production is the safer default: a 500 never echoes the exception even if
+      # someone exposes the demo stack. Set Development for readable console logs.
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       ASPNETCORE_HTTP_PORTS: 8080
       ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-multitenantDb};Username=${POSTGRES_USER:-multitenant-DbUser};Password=${POSTGRES_PASSWORD:-multitenant-DbPassword123!}"
       # Required: compose refuses to start without a real key, so the stack can

@@ -1,7 +1,7 @@
 using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
-using Multitenant.Application.Common;
+using Multitenant.Api.ErrorHandling;
 
 namespace Multitenant.Api.Filters;
 
@@ -41,7 +41,7 @@ public sealed class ValidationFilter(IServiceProvider services) : IAsyncActionFi
             {
                 var key = string.IsNullOrWhiteSpace(failure.PropertyName)
                     ? "request"
-                    : ToCamelCasePath(failure.PropertyName);
+                    : ApiProblemDetails.ToCamelCasePath(failure.PropertyName);
 
                 errors[key] = errors.TryGetValue(key, out var existing)
                     ? [.. existing, failure.ErrorMessage]
@@ -51,30 +51,11 @@ public sealed class ValidationFilter(IServiceProvider services) : IAsyncActionFi
 
         if (errors.Count > 0)
         {
-            var problem = new ValidationProblemDetails(errors)
-            {
-                Status = StatusCodes.Status400BadRequest,
-                Title = "Validation failed",
-                Type = "https://datatracker.ietf.org/doc/html/rfc9110#section-15.5.1",
-                Instance = context.HttpContext.Request.Path,
-                Extensions =
-                {
-                    ["code"] = "validation_failed",
-                    ["traceId"] = context.HttpContext.TraceIdentifier,
-                    ["correlationId"] = context.HttpContext.Items[CorrelationKeys.ItemKey]
-                }
-            };
-
-            context.Result = new BadRequestObjectResult(problem);
+            context.Result = new BadRequestObjectResult(
+                ApiProblemDetails.CreateValidation(context.HttpContext, errors));
             return;
         }
 
         await next();
     }
-
-    private static string ToCamelCasePath(string propertyName) =>
-        string.Join(
-            '.',
-            propertyName.Split('.').Select(segment =>
-                segment.Length == 0 ? segment : char.ToLowerInvariant(segment[0]) + segment[1..]));
 }

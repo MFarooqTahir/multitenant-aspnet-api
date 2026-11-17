@@ -29,6 +29,8 @@ jobs:
           # Latest SDK release. global.json keeps the floor at 10.0.401 with
           # rollForward latestFeature, so older local SDKs still build the same code.
           dotnet-version: "10.0.403"
+          cache: true
+          cache-dependency-path: "**/*.csproj"
 
       - name: Restore
         run: dotnet restore multitenant-aspnet-api.slnx
@@ -56,6 +58,11 @@ jobs:
         with:
           name: test-results
           path: TestResults
+
+      # The publish job only runs after a merge, so build the image here too:
+      # a broken Dockerfile should fail the pull request, not master.
+      - name: Build container image
+        run: docker build --file src/Multitenant.Api/Dockerfile --tag multitenant-api:ci .
 
   publish-image:
     name: Publish container image

@@ -18,8 +18,12 @@ namespace Multitenant.Api.RateLimiting;
 /// what stops one noisy tenant from exhausting another tenant's budget.
 /// </para>
 /// <para>
-/// Authentication endpoints opt into the stricter <see cref="AuthPolicy"/>, which
-/// partitions by client IP to slow down credential stuffing before a tenant is known.
+/// Credential-entry endpoints (login, 2FA verification, confirmation resend,
+/// onboarding) opt into the stricter <see cref="AuthPolicy"/>, which partitions by
+/// client IP to slow down credential stuffing before a tenant is known. Routine
+/// calls such as refresh and register intentionally stay on the global budget:
+/// they are not credential guesses, and a per-IP bucket shared by everyone behind
+/// one office NAT would otherwise lock out legitimate sessions.
 /// </para>
 /// <para>
 /// Options are resolved per request so configuration overrides (tests, environment
@@ -28,6 +32,7 @@ namespace Multitenant.Api.RateLimiting;
 /// </remarks>
 public static class RateLimitingSetup
 {
+    /// <summary>Strict per-IP budget for endpoints that accept credentials.</summary>
     public const string AuthPolicy = "auth";
 
     public static IServiceCollection AddApiRateLimiting(this IServiceCollection services)

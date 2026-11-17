@@ -244,6 +244,14 @@ public sealed class AuthService(
             return;
         }
 
+        // The endpoint is authenticated, but the refresh token identifies the
+        // session. Never let one caller revoke another user's session, even if
+        // they somehow obtained its token.
+        if (stored.UserId != currentUser.UserId)
+        {
+            return;
+        }
+
         stored.RevokedAtUtc = timeProvider.GetUtcNow();
         stored.RevokedReason = "logout";
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -390,6 +398,24 @@ public sealed class AuthService(
             throw InvalidTwoFactorChallenge();
         }
 
+        // A challenge is issued only after a correct password, but the account can
+        // still be locked out by failed password attempts between the two steps.
+        // Lockout must cover the second factor too, otherwise a 5-minute challenge
+        // allows unlimited six-digit guesses.
+        if (await userManager.IsLockedOutAsync(user))
+        {
+            throw new UnauthorizedException();
+        }
+
+        // VerifyTwoFactorAsync can be reached minutes after login; keep the same
+        // ordering rule the password path uses (checked after the credential).
+        if (_identity.RequireConfirmedEmail && !user.EmailConfirmed)
+        {
+            throw new ForbiddenException(
+                "Email confirmation is required before signing in.",
+                "email_not_confirmed");
+        }
+
         var tenant = await FindTenantByIdAsync(user.TenantId, cancellationToken);
         if (tenant is null || !tenant.IsActive)
         {
@@ -403,6 +429,7 @@ public sealed class AuthService(
             var recovery = await userManager.RedeemTwoFactorRecoveryCodeAsync(user, request.RecoveryCode);
             if (!recovery.Succeeded)
             {
+                await userManager.AccessFailedAsync(user);
                 throw new UnauthorizedException("Invalid recovery code.", "invalid_two_factor_code");
             }
         }

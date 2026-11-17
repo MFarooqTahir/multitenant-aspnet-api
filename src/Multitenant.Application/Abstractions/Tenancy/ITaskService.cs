@@ -11,6 +11,15 @@ public interface ITaskService
 {
     Task<PagedResult<TaskResponse>> ListAsync(TaskQuery query, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Lists the tasks of one project. Unknown and cross-tenant project ids return
+    /// not-found, matching every other tenant-scoped resource read.
+    /// </summary>
+    Task<PagedResult<TaskResponse>> ListForProjectAsync(
+        Guid projectId,
+        TaskQuery query,
+        CancellationToken cancellationToken);
+
     Task<TaskResponse> GetAsync(Guid id, CancellationToken cancellationToken);
 
     Task<TaskResponse> CreateAsync(

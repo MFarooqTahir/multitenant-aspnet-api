@@ -1,6 +1,8 @@
 <Solution>
   <Folder Name="/Solution Items/">
     <File Path="compose.yaml" />
+    <File Path="compose.demo.yaml" />
+    <File Path=".env.example" />
     <File Path="Directory.Build.props" />
     <File Path="HANDOVER.md" />
     <File Path="README.md" />
@@ -20,6 +22,12 @@
     <File Path="docs/adr/0005-identity-feature-flags.md" />
     <File Path="docs/adr/0006-rate-limiting.md" />
     <File Path="docs/adr/0007-observability.md" />
+    <File Path="docs/adr/0008-admin-only-registration.md" />
+    <File Path="docs/adr/0009-per-tenant-feature-flags.md" />
+    <File Path="docs/adr/0010-tenant-lifecycle-scope.md" />
+    <File Path="docs/adr/0011-central-package-management.md" />
+    <File Path="docs/adr/0012-dotnet-version-target.md" />
+    <File Path="Directory.Packages.props" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Multitenant.IntegrationTests/Multitenant.IntegrationTests.csproj" />

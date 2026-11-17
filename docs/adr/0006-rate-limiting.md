@@ -18,10 +18,16 @@ stricter named policy:
 - **Global limiter** — 120 requests/minute partitioned by the `tenant_id` claim, falling
   back to the client IP for anonymous requests. Because the partition key is the tenant, one
   tenant exhausting its budget cannot affect another.
-- **`auth` policy** — 10 requests/minute partitioned by client IP, applied to login,
-  refresh, resend-confirmation, two-factor verification and tenant onboarding, plus
-  `POST /auth/register` (authenticated, but kept on the stricter budget as defence in depth).
-  It runs alongside the global limiter, giving auth endpoints the stricter of the two.
+- **`auth` policy** — 10 requests/minute partitioned by client IP, applied to the endpoints
+  that accept credentials or can trigger an email: login, two-factor verification,
+  resend-confirmation and tenant onboarding. It runs alongside the global limiter, giving
+  those endpoints the stricter of the two.
+- **Routine authenticated or session-maintenance calls stay on the global budget.** Refresh
+  and `POST /auth/register` are not credential guesses: refresh happens on a timer for every
+  client, and a shared per-IP bucket would let one office NAT (or a login rush) lock out
+  legitimate sessions. Register is already tenant-scoped by the global partition; refresh
+  falls back to the IP partition until a tenant is known. Both remain bounded, just not at
+  the login-sized limit.
 
 Options are resolved per request from `IOptions<RateLimitingOptions>`, so configuration
 overrides (including test hosts) take effect without rebuilding the policy.

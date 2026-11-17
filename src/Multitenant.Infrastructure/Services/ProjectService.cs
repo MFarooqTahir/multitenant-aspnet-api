@@ -9,10 +9,13 @@ using Multitenant.Infrastructure.Persistence;
 
 namespace Multitenant.Infrastructure.Services;
 
+/// <summary>
+/// Projects of the current tenant. The tenant filter in <see cref="AppDbContext"/>
+/// scopes every query, so this service never adds its own <c>TenantId</c> predicate.
+/// </summary>
 public sealed class ProjectService(
     AppDbContext dbContext,
-    ITenantContext tenantContext,
-    TimeProvider timeProvider) : IProjectService
+    ITenantContext tenantContext) : IProjectService
 {
     private static readonly HashSet<string> SortFields = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -80,8 +83,6 @@ public sealed class ProjectService(
             Name = request.Name.Trim(),
             Description = NormalizeDescription(request.Description),
             Status = request.Status,
-            CreatedAtUtc = timeProvider.GetUtcNow(),
-            UpdatedAtUtc = timeProvider.GetUtcNow(),
         };
 
         dbContext.Projects.Add(project);

@@ -114,6 +114,32 @@ public sealed class TenantIsolationTests : IntegrationTestBase
         Assert.Equal(2, list.Items.Count); // the owner plus the member created above
     }
 
+    [Fact]
+    public async Task CrossTenantProjectTaskListReturns404()
+    {
+        using var client = CreateClient();
+
+        var alpha = await OnboardAsync(client, "iso-j", "Iso Kappa", "isokappa@acme.test");
+        var beta = await OnboardAsync(client, "iso-k", "Iso Lambda", "isolambda@acme.test");
+        var alphaTokens = await Scenarios.LoginAsync(client, alpha.Slug, alpha.OwnerEmail);
+        var betaTokens = await Scenarios.LoginAsync(client, beta.Slug, beta.OwnerEmail);
+
+        var project = await Scenarios.CreateProjectAsync(client, alphaTokens.AccessToken, "Kappa Rocket");
+
+        var own = await client.GetApi($"/api/v1/projects/{project.Id}/tasks", alphaTokens.AccessToken);
+        Assert.Equal(HttpStatusCode.OK, own.StatusCode);
+
+        var crossTenant = await client.GetApi(
+            $"/api/v1/projects/{project.Id}/tasks",
+            betaTokens.AccessToken);
+        Assert.Equal(HttpStatusCode.NotFound, crossTenant.StatusCode);
+
+        var unknown = await client.GetApi(
+            $"/api/v1/projects/{Guid.NewGuid()}/tasks",
+            alphaTokens.AccessToken);
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+    }
+
     private static async Task<OnboardedTenant> OnboardAsync(
         HttpClient client,
         string slug,
