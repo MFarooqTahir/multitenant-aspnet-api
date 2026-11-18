@@ -684,7 +684,7 @@ The design is deliberately single-node and single-database today:
 ├── .dockerignore                      keeps local secrets out of the image
 ├── .env.example                       compose environment template
 ├── README.md                          product, API and setup guide
-├── HANDOVER.md                        engineering notes for contributors and agents
+├── AGENTS.md                          agent rules: invariants, migrations, provisioning
 ├── compose.yaml                       PostgreSQL + API for local runs
 ├── compose.demo.yaml                  local-only demo overlay (seeds acme/globex)
 ├── Directory.Packages.props           central NuGet versions (CPM)
