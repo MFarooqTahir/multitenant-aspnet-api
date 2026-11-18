@@ -1,7 +1,10 @@
 # 0012 — Stay on .NET 10 LTS until the providers ship .NET 11 support
 
-- **Status:** Accepted
+- **Status:** Superseded by [0013](0013-dotnet-11-with-ef-core-10.md)
 - **Date:** 2026-11-18
+
+> **Superseded:** the application now targets `net11.0`. The part of this decision that still
+> holds is the stable-only rule for the EF Core data stack; ADR 0013 records the current target.
 
 ## Context
 

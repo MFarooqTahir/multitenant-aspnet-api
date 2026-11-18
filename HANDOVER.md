@@ -11,6 +11,7 @@ It doubles as the onboarding path for a new contributor (or an AI pair).
 | Area | State |
 | --- | --- |
 | Build | `dotnet build multitenant-aspnet-api.slnx` succeeds with 0 warnings (warnings are errors) |
+| Framework | `net11.0` (.NET 11 GA, SDK 11.0.100); ASP.NET Core packages 11.0.0, EF Core 10.0.13 until Npgsql ships 11.0.0 (ADR 0013) |
 | Unit tests | 40 passing |
 | Integration tests | 71 passing against Testcontainers PostgreSQL 16 |
 | API surface | Auth, tenants (onboard/current/rename/features), users, projects, tasks, health, OpenAPI |
@@ -298,11 +299,11 @@ cross-platform.
 7. Optional caching of the per-request user/security-stamp lookup.
 8. Introduce a platform-administrator role if tenant listing, deactivation and reactivation are
    ever needed; today the API is intentionally tenant-scoped only (ADR 0010).
-9. Revisit .NET 11 when `Npgsql.EntityFrameworkCore.PostgreSQL` 11.0.0 and `Asp.Versioning` 11
-   ship stable. Today Npgsql is `11.0.0-rc.3` (pins EF Core to the RC, conflicting with stable
-   Identity 11) and `Asp.Versioning.OpenApi` 10.2.3 requires `Microsoft.OpenApi < 3.0.0` while
-   ASP.NET Core OpenAPI 11 requires `>= 3.11.0`. The project deliberately stays on .NET 10 LTS,
-   which the plan calls for, rather than shipping a release-candidate data stack.
+9. Move the EF Core data stack (and `Microsoft.AspNetCore.OpenApi` / `Asp.Versioning.OpenApi`) to
+   11.0 once `Npgsql.EntityFrameworkCore.PostgreSQL` 11.0.0 ships stable. Npgsql 10.0.3 declares
+   `Microsoft.EntityFrameworkCore < 11.0.0`, and the available 11.0.0 build is `rc.3` with EF
+   Core pinned to the RC; the repo is stable-only. The application already targets `net11.0`;
+   see ADR 0013 for the exact gate.
 
 ---
 

@@ -1,14 +1,14 @@
 # Multitenant SaaS API
 
-![.NET](https://img.shields.io/badge/.NET-10-512BD4)
-![ASP.NET Core](https://img.shields.io/badge/ASP.NET%20Core-10-512BD4)
+![.NET](https://img.shields.io/badge/.NET-11-512BD4)
+![ASP.NET Core](https://img.shields.io/badge/ASP.NET%20Core-11-512BD4)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791)
 ![EF Core](https://img.shields.io/badge/EF%20Core-10-512BD4)
 ![Tests](https://img.shields.io/badge/tests-40%20unit%20%2B%2071%20integration-2ea44f)
 ![CI](https://github.com/MFarooqTahir/multitenant-aspnet-api/actions/workflows/ci.yml/badge.svg)
 ![Licence](https://img.shields.io/badge/licence-MIT-blue)
 
-A production-minded, multi-tenant SaaS backend on ASP.NET Core 10, EF Core 10 and PostgreSQL 16:
+A production-minded, multi-tenant SaaS backend on ASP.NET Core 11, EF Core 10 and PostgreSQL 16:
 tenant isolation enforced in depth, JWT authentication with rotating refresh tokens, role-based
 authorization, transactional onboarding, rate limiting, health checks, OpenAPI, structured
 logging and a real integration-test suite.
@@ -115,7 +115,7 @@ non-obvious decision is written down as an ADR.
 
 ### Prerequisites
 
-- [.NET SDK 10.0.4xx](global.json) (pinned to `10.0.401`, `rollForward: latestFeature`)
+- [.NET SDK 11.0.100](global.json) (`rollForward: latestFeature`)
 - Docker Desktop (or any PostgreSQL 16 you own)
 - Optional: `dotnet-ef` (`dotnet tool install --global dotnet-ef --version 10.*`)
 
@@ -632,23 +632,26 @@ permissions (`packages: write`) or a `CR_PAT`.
 | [0009](docs/adr/0009-per-tenant-feature-flags.md) | Per-tenant feature flags as kill switches |
 | [0010](docs/adr/0010-tenant-lifecycle-scope.md) | Tenant lifecycle stays tenant-scoped |
 | [0011](docs/adr/0011-central-package-management.md) | Central Package Management for NuGet versions |
-| [0012](docs/adr/0012-dotnet-version-target.md) | Stay on .NET 10 LTS until the providers ship .NET 11 |
+| [0012](docs/adr/0012-dotnet-version-target.md) | Superseded: staying on .NET 10 LTS |
+| [0013](docs/adr/0013-dotnet-11-with-ef-core-10.md) | .NET 11 GA with the stable EF Core 10 data stack |
 
-### Toolchain: .NET 10 LTS today, .NET 11 when the providers catch up
+### Toolchain: .NET 11 GA, stable packages only
 
-The project targets **.NET 10 LTS**, the current long-term-support release the plan asks for.
-.NET 11 is available, but a migration is blocked by two dependencies that have no stable
-.NET 11 release yet:
+The app targets **.NET 11** (GA, STS, supported through November 2028). Nothing is a preview,
+RC or beta. One deliberate exception: the EF Core data stack stays on **10.0.x**, because the
+Npgsql provider has no stable EF Core 11 release yet.
 
-| Dependency | Latest stable | Why it blocks the move |
+| Dependency | Version | Why |
 | --- | --- | --- |
-| `Npgsql.EntityFrameworkCore.PostgreSQL` | `10.0.3` | The 11.0.0 line exists only as `rc.3`, and it pins `Microsoft.EntityFrameworkCore` to `11.0.0-rc.3`; ASP.NET Core Identity 11 requires the stable `11.0.0`, so restore fails with NU1107. |
-| `Asp.Versioning.OpenApi` | `10.2.3` | It requires `Microsoft.OpenApi < 3.0.0`, while `Microsoft.AspNetCore.OpenApi` 11 requires `Microsoft.OpenApi >= 3.11.0` (NU1608). |
+| SDK / TFM | `11.0.100` / `net11.0` | .NET 11 GA |
+| ASP.NET Core packages (`JwtBearer`, `Mvc.Testing`) | `11.0.0` | .NET 11 GA |
+| `Microsoft.EntityFrameworkCore` + Identity/health-check integrations | `10.0.13` | `Npgsql.EntityFrameworkCore.PostgreSQL` 10.0.3 declares `Microsoft.EntityFrameworkCore < 11.0.0`; the 11.0.0 line is only `11.0.0-rc.3` and pins EF Core to the RC |
+| `Npgsql.EntityFrameworkCore.PostgreSQL` | `10.0.3` | latest **stable** provider |
+| `Microsoft.AspNetCore.OpenApi` / `Asp.Versioning.OpenApi` | `10.0.13` / `10.2.3` | `Asp.Versioning.OpenApi` requires `Microsoft.OpenApi` 2.x, while ASP.NET Core OpenAPI 11 requires 3.11+; both stay on their stable 10 line |
 
-Moving today would mean a release-candidate data stack plus replacing the versioned
-OpenAPI integration. That is the wrong trade for a portfolio project: reviewers read "RC
-database provider". Revisit when Npgsql 11.0.0 and Asp.Versioning 11 ship; see
-[ADR 0012](docs/adr/0012-dotnet-version-target.md).
+Everything else is on its latest stable release (`Serilog.AspNetCore` 11.0.0, `MailKit`
+4.18.2, `Testcontainers` 4.17.0). When Npgsql ships 11.0.0, the data stack and the OpenAPI
+integration move in one CPM bump; see [ADR 0013](docs/adr/0013-dotnet-11-with-ef-core-10.md).
 
 ### What changes at 10x scale
 

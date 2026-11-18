@@ -26,11 +26,13 @@ jobs:
       - name: Set up .NET
         uses: actions/setup-dotnet@v6
         with:
-          # Latest SDK release. global.json keeps the floor at 10.0.401 with
-          # rollForward latestFeature, so older local SDKs still build the same code.
-          dotnet-version: "10.0.403"
+          # .NET 11 GA. global.json pins the same 11.0.100 floor with
+          # rollForward latestFeature, so patch SDKs still build the same code.
+          dotnet-version: "11.0.100"
           cache: true
-          cache-dependency-path: "**/*.csproj"
+          cache-dependency-path: |
+            **/*.csproj
+            Directory.Packages.props
 
       - name: Restore
         run: dotnet restore multitenant-aspnet-api.slnx
