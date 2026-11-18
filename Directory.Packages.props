@@ -28,9 +28,9 @@
       and NpgsqlVersion together. OpenApiVersion moves once an Asp.Versioning
       release supports Microsoft.OpenApi 3.x.
     -->
-    <DataStackVersion>10.0.13</DataStackVersion>
+    <DataStackVersion>11.0.0</DataStackVersion>
     <NpgsqlVersion>10.0.3</NpgsqlVersion>
-    <OpenApiVersion>10.0.13</OpenApiVersion>
+    <OpenApiVersion>11.0.0</OpenApiVersion>
   </PropertyGroup>
 
   <ItemGroup>
