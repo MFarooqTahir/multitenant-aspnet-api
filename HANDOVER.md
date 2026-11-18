@@ -13,7 +13,7 @@ It doubles as the onboarding path for a new contributor (or an AI pair).
 | Build | `dotnet build multitenant-aspnet-api.slnx` succeeds with 0 warnings (warnings are errors) |
 | Framework | `net11.0` (.NET 11 GA, SDK 11.0.100); ASP.NET Core packages 11.0.0, EF Core 10.0.13 until Npgsql ships 11.0.0 (ADR 0013) |
 | Unit tests | 40 passing |
-| Integration tests | 71 passing against Testcontainers PostgreSQL 16 |
+| Integration tests | 73 passing against Testcontainers PostgreSQL 16 |
 | API surface | Auth, tenants (onboard/current/rename/features), users, projects, tasks, health, OpenAPI |
 | Migrations | `InitialCreate` plus `TenantFeatures`, applied automatically in Development |
 | Docker | `Dockerfile` and `compose.yaml` are current; `compose.demo.yaml` seeds the demo tenants; image builds in CI |
@@ -178,6 +178,9 @@ cross-platform.
 - **Both factors share one lockout.** Five bad TOTP or recovery codes lock the account just
   like five bad passwords, and a locked account cannot finish a challenge even with the
   correct code. Logout revokes only a refresh token owned by the caller.
+- **Token responses are non-cacheable.** Login, refresh and 2FA verification set
+  `Cache-Control: no-store` and `Pragma: no-cache`; after authentication, `TenantId` and
+  `UserId` are pushed into the Serilog context.
 - **`GET /projects/{id}/tasks` returns 404** for an unknown or cross-tenant project id instead
   of an empty page; the list is not a way to probe for another tenant's project.
 - **Registration does not confirm email, but it does send the link.** `POST /auth/register`
@@ -310,6 +313,8 @@ cross-platform.
 ## 10. Git and release
 
 - Default branch: `master` (the workflow also accepts `main`).
+- Dependabot (`.github/dependabot.yml`) opens grouped weekly PRs for NuGet/CPM, Actions and
+  the Docker base image.
 - Commit style used here: short imperative subject, body explaining the why.
 - To cut a release:
 
@@ -331,7 +336,7 @@ cross-platform.
 1. `git status` — expect a clean tree.
 2. `dotnet build multitenant-aspnet-api.slnx` — expect 0 warnings.
 3. `dotnet test tests/Multitenant.UnitTests` — expect 40 passing.
-4. Start Docker, then `dotnet test tests/Multitenant.IntegrationTests` — expect 71 passing.
+4. Start Docker, then `dotnet test tests/Multitenant.IntegrationTests` — expect 73 passing.
 5. `cp .env.example .env` and adjust `JWT_SIGNING_KEY`/`POSTGRES_PASSWORD`. For the demo
    accounts, use the local-only overlay: `docker compose -f compose.yaml -f compose.demo.yaml
    up --build`, open <http://localhost:8080/scalar>, and log in as `acme`/`owner@acme.test`

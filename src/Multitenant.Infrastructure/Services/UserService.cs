@@ -193,7 +193,7 @@ public sealed class UserService(
 
         // Invalidate every access token issued with the previous role. Refresh tokens
         // stay valid, so the next refresh returns a token carrying the new role.
-        await userManager.UpdateSecurityStampAsync(target);
+        EnsureSucceeded(await userManager.UpdateSecurityStampAsync(target), "role_update_failed");
         await transaction.CommitAsync(cancellationToken);
 
         return userProvisioning.ToResponse(target, requestedRole);

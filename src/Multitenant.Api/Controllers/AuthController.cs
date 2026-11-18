@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Multitenant.Api.Authorization;
+using Multitenant.Api.Filters;
 using Multitenant.Api.RateLimiting;
 using Multitenant.Application.Abstractions.Identity;
 using Multitenant.Application.Contracts.Auth;
@@ -20,6 +21,7 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     [HttpPost("login")]
     [AllowAnonymous]
     [EnableRateLimiting(RateLimitingSetup.AuthPolicy)]
+    [NoStoreResponse]
     [ProducesResponseType<AuthTokens>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Login(LoginRequest request, CancellationToken cancellationToken)
@@ -59,6 +61,7 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     /// <summary>Exchanges a refresh token for a new token pair (rotation + reuse detection).</summary>
     [HttpPost("refresh")]
     [AllowAnonymous]
+    [NoStoreResponse]
     [ProducesResponseType<AuthTokens>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<AuthTokens>> Refresh(
@@ -148,6 +151,7 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     [HttpPost("2fa/verify")]
     [AllowAnonymous]
     [EnableRateLimiting(RateLimitingSetup.AuthPolicy)]
+    [NoStoreResponse]
     [ProducesResponseType<AuthTokens>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<AuthTokens>> VerifyTwoFactor(

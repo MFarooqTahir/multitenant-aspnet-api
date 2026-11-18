@@ -1,4 +1,7 @@
 using System.Net;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.DependencyInjection;
+using Multitenant.Application.Abstractions.Tenancy;
 using Multitenant.Application.Contracts.Users;
 using Multitenant.Domain.Entities;
 using Multitenant.IntegrationTests.Infrastructure;
@@ -88,6 +91,62 @@ public sealed class AuthorizationRulesTests : IntegrationTestBase
 
         Assert.False(string.IsNullOrWhiteSpace(first.AccessToken));
         Assert.False(string.IsNullOrWhiteSpace(second.AccessToken));
+    }
+
+    [Fact]
+    public async Task ConcurrentCrossDemotionsCannotLeaveTheTenantWithoutAnOwner()
+    {
+        using var client = CreateClient();
+        var tenant = await Scenarios.OnboardAsync(client, "rules-race", "Rules Race", "race-first@acme.test");
+        var firstOwner = await Scenarios.LoginAsync(client, tenant.Slug, "race-first@acme.test");
+        var firstOwnerId = await GetCurrentUserIdAsync(client, firstOwner.AccessToken);
+
+        var secondOwner = await CreateUserAsync(
+            client,
+            firstOwner.AccessToken,
+            "race-second@acme.test",
+            TenantRoles.Owner);
+        var secondOwnerTokens = await Scenarios.LoginAsync(
+            client,
+            tenant.Slug,
+            "race-second@acme.test",
+            Scenarios.Password);
+
+        // Two Owners demote each other at the same time. The tenant row lock
+        // serializes the guard, so exactly one demotion wins and one Owner remains.
+        var firstDemotesSecond = client.PatchApi(
+            $"/api/v1/users/{secondOwner.Id}/role",
+            new UpdateUserRoleRequest(TenantRoles.Member),
+            firstOwner.AccessToken);
+
+        var secondDemotesFirst = client.PatchApi(
+            $"/api/v1/users/{firstOwnerId}/role",
+            new UpdateUserRoleRequest(TenantRoles.Member),
+            secondOwnerTokens.AccessToken);
+
+        var responses = await Task.WhenAll(firstDemotesSecond, secondDemotesFirst);
+
+        Assert.Equal(1, responses.Count(response => response.StatusCode == HttpStatusCode.OK));
+        Assert.All(
+            responses.Where(response => response.StatusCode != HttpStatusCode.OK),
+            response => Assert.True(
+                response.StatusCode is HttpStatusCode.Conflict or HttpStatusCode.Unauthorized,
+                $"Unexpected status {response.StatusCode}."));
+
+        var conflict = responses.SingleOrDefault(response => response.StatusCode == HttpStatusCode.Conflict);
+        if (conflict is not null)
+        {
+            var problem = await conflict.ReadAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
+            Assert.Equal("last_owner", problem.Extensions["code"]?.ToString());
+        }
+
+        // The database, not the API, is the source of truth for the invariant.
+        using var scope = Harness.Factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<ITenantContext>().SetTenant(tenant.Id, tenant.Slug);
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>();
+
+        var owners = await userManager.GetUsersInRoleAsync(TenantRoles.Owner);
+        Assert.Single(owners);
     }
 
     private static async Task<UserResponse> CreateUserAsync(

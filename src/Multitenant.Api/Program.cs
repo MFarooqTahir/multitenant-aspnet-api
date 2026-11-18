@@ -111,6 +111,7 @@ if (cors.AllowedOrigins.Length > 0)
 }
 
 app.UseAuthentication();
+app.UseMiddleware<TenantLogContextMiddleware>();
 app.UseRateLimiter();
 app.UseAuthorization();
 

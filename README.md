@@ -4,7 +4,7 @@
 ![ASP.NET Core](https://img.shields.io/badge/ASP.NET%20Core-11-512BD4)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791)
 ![EF Core](https://img.shields.io/badge/EF%20Core-10-512BD4)
-![Tests](https://img.shields.io/badge/tests-40%20unit%20%2B%2071%20integration-2ea44f)
+![Tests](https://img.shields.io/badge/tests-40%20unit%20%2B%2073%20integration-2ea44f)
 ![CI](https://github.com/MFarooqTahir/multitenant-aspnet-api/actions/workflows/ci.yml/badge.svg)
 ![Licence](https://img.shields.io/badge/licence-MIT-blue)
 
@@ -101,7 +101,7 @@ dotnet test tests/Multitenant.IntegrationTests --filter "FullyQualifiedName~Tena
 | Per-tenant feature flags with whitelisted keys | [ADR 0009](docs/adr/0009-per-tenant-feature-flags.md), `TenantFeatureTests` |
 | Tenant rename with an immutable login slug | [ADR 0010](docs/adr/0010-tenant-lifecycle-scope.md), `TenantManagementTests` |
 | FluentValidation, fail-closed at startup | `Validation/`, `ValidationFilterAssertion` |
-| 111 tests: 40 unit + 71 integration, Testcontainers against real PostgreSQL | [Testing](#testing) |
+| 113 tests: 40 unit + 73 integration, Testcontainers against real PostgreSQL | [Testing](#testing) |
 | Clean layering, one-way dependencies, no business logic in controllers | [ADR 0002](docs/adr/0002-layered-solution.md) |
 | Docker multi-stage image, compose stack, CI publishing to GHCR | [Operations](#operations), `.github/workflows/ci.yml` |
 | Correlation ids, Serilog JSON logging, optional App Insights | [ADR 0007](docs/adr/0007-observability.md) |
@@ -260,6 +260,8 @@ still required.
 - **One lockout covers both factors** — the password and the TOTP/recovery-code check share
   Identity's counters, so a locked account cannot finish a 2FA challenge even with the correct
   code. Logout only revokes a token owned by the caller.
+- **Token responses are never cached** — login, refresh and 2FA verification return
+  `Cache-Control: no-store` and `Pragma: no-cache`.
 - **Single session by default** — `Auth:SingleSessionPerUser=true` rotates the stamp on login
   and revokes all other refresh tokens, so only the newest session survives. Set `false` for
   multi-device use.
@@ -513,7 +515,7 @@ API's `appsettings*.json`, then falls back to the Development connection string.
 
 ## Testing
 
-**111 tests: 40 unit + 71 integration.** No mocks of the data layer and no in-memory database —
+**113 tests: 40 unit + 73 integration.** No mocks of the data layer and no in-memory database —
 integration tests run against a real PostgreSQL 16 container (Testcontainers).
 
 ```bash
@@ -534,6 +536,8 @@ offset overflow, claim generation, 2FA challenge validation and refresh-token ha
 - cross-tenant task-assignee rejection at the database level, including the NULL-column bypass;
 - refresh rotation, reuse detection, family revocation, expiry and concurrent rotation;
 - logout scoping (a caller cannot revoke another user's refresh token);
+- the last-Owner guard under concurrent cross-demotions (one request wins, the other gets
+  `409 last_owner` or `401`, and one Owner remains);
 - single-session enforcement and the multi-device path (`SingleSessionPerUser=false`);
 - role-change invalidation and refreshed role claims;
 - logout, logout-all, and lockout after repeated bad passwords;
@@ -600,13 +604,16 @@ about 20 seconds once the image is cached.
 
 The current release is **`v1.0.1`**, which produces container tags `1.0.1` and `1.0`. No
 repository secrets are required for tests; the image uses the workflow's default `GITHUB_TOKEN`
-permissions (`packages: write`) or a `CR_PAT`.
+permissions (`packages: write`) or a `CR_PAT`. Dependabot opens grouped weekly PRs for NuGet
+(CPM), GitHub Actions and the Docker base image.
 
 ### Observability
 
 - **Correlation** — every request carries an `X-Correlation-Id` (accepted or generated,
   restricted to `[A-Za-z0-9._-]`), echoed on the response, pushed into the Serilog context and
   included in problem details alongside ASP.NET's `traceId`.
+- **Tenant and user context** — after authentication, `TenantId` and `UserId` are pushed into
+  the Serilog context, so one query can isolate a tenant's requests.
 - **Request logging** — method, path, status and elapsed time per request.
 - **Environments** — readable console in Development; compact JSON on stdout elsewhere, which
   is natively ingestible by CloudWatch Logs and Azure Log Analytics.

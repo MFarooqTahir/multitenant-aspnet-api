@@ -34,6 +34,22 @@ public sealed class AuthLifecycleTests : IntegrationTestBase
     }
 
     [Fact]
+    public async Task LoginResponseIsNotCacheable()
+    {
+        using var client = CreateClient();
+
+        var response = await client.PostApi(
+            "/api/v1/auth/login",
+            new LoginRequest("acme", "owner@acme.test", "Demo123!Passw0rd"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(response.Headers.TryGetValues("Cache-Control", out var cacheControl));
+        Assert.Contains("no-store", cacheControl);
+        Assert.True(response.Headers.TryGetValues("Pragma", out var pragma));
+        Assert.Contains("no-cache", pragma);
+    }
+
+    [Fact]
     public async Task InvalidCredentialsAreRejected()
     {
         using var client = CreateClient();
