@@ -18,7 +18,7 @@ namespace Multitenant.IntegrationTests;
 [Collection(IntegrationHarness.CollectionName)]
 public sealed class JwtLiveValidationTests : IntegrationTestBase
 {
-    private const string SigningKey = "integration-test-signing-key-0123456789abcdef0123456789";
+    private const string SigningKey = "integration-test-signing-key-0123456789abcdef0123456789"; // Test-only key for invalid-JWT cases; fingerprinted in .gitleaksignore.
 
     public JwtLiveValidationTests(IntegrationHarness harness) => Harness = harness;
 

@@ -4,7 +4,7 @@ namespace Multitenant.IntegrationTests;
 
 public sealed class TotpTests
 {
-    private const string RfcSha1Secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+    private const string RfcSha1Secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"; // Public RFC 6238 vector; Gitleaks exception is fingerprinted in .gitleaksignore.
 
     [Theory]
     [InlineData(59, "94287082")]
