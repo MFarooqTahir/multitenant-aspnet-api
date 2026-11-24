@@ -23,7 +23,7 @@
     <!-- Keep the coupled data-stack packages on one version. -->
     <DataStackVersion>11.0.0</DataStackVersion>
     <NpgsqlVersion>11.0.0</NpgsqlVersion>
-    <OpenApiVersion>10.0.13</OpenApiVersion>
+    <OpenApiVersion>11.0.0</OpenApiVersion>
   </PropertyGroup>
 
   <ItemGroup>
