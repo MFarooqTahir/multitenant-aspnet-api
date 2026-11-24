@@ -11,9 +11,13 @@ public static class Totp
 {
     private const string Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
-    public static string Compute(string base32Secret, DateTimeOffset now, int digits = 6, int period = 30)
+    public static string Compute(string base32Secret, DateTimeOffset now, int digits = 6, int period = 30) =>
+        Compute(Base32Decode(base32Secret), now, digits, period);
+
+    public static string Compute(byte[] key, DateTimeOffset now, int digits = 6, int period = 30)
     {
-        var key = Base32Decode(base32Secret);
+        ArgumentNullException.ThrowIfNull(key);
+
         var counter = now.ToUnixTimeSeconds() / period;
 
         var counterBytes = new byte[8];
