@@ -3,12 +3,12 @@
 ![.NET](https://img.shields.io/badge/.NET-11-512BD4)
 ![ASP.NET Core](https://img.shields.io/badge/ASP.NET%20Core-11-512BD4)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791)
-![EF Core](https://img.shields.io/badge/EF%20Core-10-512BD4)
-![Tests](https://img.shields.io/badge/tests-40%20unit%20%2B%2073%20integration-2ea44f)
+![EF Core](https://img.shields.io/badge/EF%20Core-11-512BD4)
+![Tests](https://img.shields.io/badge/tests-40%20unit%20%2B%2078%20integration-2ea44f)
 ![CI](https://github.com/MFarooqTahir/multitenant-aspnet-api/actions/workflows/ci.yml/badge.svg)
 ![Licence](https://img.shields.io/badge/licence-MIT-blue)
 
-A production-minded, multi-tenant SaaS backend on ASP.NET Core 11, EF Core 10 and PostgreSQL 16:
+A production-minded, multi-tenant SaaS backend on ASP.NET Core 11, EF Core 11 and PostgreSQL 16:
 tenant isolation enforced in depth, JWT authentication with rotating refresh tokens, role-based
 authorization, transactional onboarding, rate limiting, health checks, OpenAPI, structured
 logging and a real integration-test suite.
@@ -94,6 +94,8 @@ dotnet test tests/Multitenant.IntegrationTests --filter "FullyQualifiedName~Tena
 | Tenant isolation enforced at five layers, including the database | [Security model](#security-model), [ADR 0003](docs/adr/0003-tenant-isolation.md), `TenantIsolationTests` |
 | ASP.NET Core Identity + custom JWT flow, live token invalidation | [ADR 0004](docs/adr/0004-identity-and-tokens.md), `AuthService` |
 | Refresh-token rotation with theft (reuse) detection | `RefreshTokenManager`, `AuthLifecycleTests` |
+| Atomic session transitions, proved by failure-injection rollback | `AuthService`, `LogoutAllRollsBackTheStampWhenRefreshTokenRevocationFails`, `FailedNewSessionIssuanceRollsBackOldSessionRevocation` |
+| Bounded refresh-token retention with a resilient hosted job | [ADR 0015](docs/adr/0015-refresh-token-retention.md), `RefreshTokenCleanupTests` |
 | Policy-based authorization with a three-role hierarchy | `Policies`, `AuthorizationRulesTests` |
 | EF Core global query filters, composite keys, interceptors, one squashed migration | `Persistence/` |
 | RFC 7807 error modelling with stable machine codes | `GlobalExceptionHandler`, `ProblemDetailsStatusCodePages` |
@@ -101,9 +103,9 @@ dotnet test tests/Multitenant.IntegrationTests --filter "FullyQualifiedName~Tena
 | Per-tenant feature flags with whitelisted keys | [ADR 0009](docs/adr/0009-per-tenant-feature-flags.md), `TenantFeatureTests` |
 | Tenant rename with an immutable login slug | [ADR 0010](docs/adr/0010-tenant-lifecycle-scope.md), `TenantManagementTests` |
 | FluentValidation, fail-closed at startup | `Validation/`, `ValidationFilterAssertion` |
-| 113 tests: 40 unit + 73 integration, Testcontainers against real PostgreSQL | [Testing](#testing) |
+| 118 tests: 40 unit + 78 integration, Testcontainers against real PostgreSQL | [Testing](#testing) |
 | Clean layering, one-way dependencies, no business logic in controllers | [ADR 0002](docs/adr/0002-layered-solution.md) |
-| Docker multi-stage image, compose stack, CI publishing to GHCR | [Operations](#operations), `.github/workflows/ci.yml` |
+| Docker multi-stage image, compose stack, CI publishing to GHCR and coverage reporting | [Operations](#operations), `.github/workflows/ci.yml` |
 | Correlation ids, Serilog JSON logging, optional App Insights | [ADR 0007](docs/adr/0007-observability.md) |
 
 The code favours explicit, readable implementations over clever abstractions, and every
@@ -117,7 +119,7 @@ non-obvious decision is written down as an ADR.
 
 - [.NET SDK 11.0.100](global.json) (`rollForward: latestFeature`)
 - Docker Desktop (or any PostgreSQL 16 you own)
-- Optional: `dotnet-ef` (`dotnet tool install --global dotnet-ef --version 10.*`)
+- Optional: `dotnet-ef` (`dotnet tool install --global dotnet-ef --version 11.*`)
 
 ### Run it locally (recommended)
 
@@ -257,6 +259,9 @@ still required.
 - **Rotation with reuse detection** — refreshing revokes the old token and issues a replacement
   in the same family. Presenting an already-revoked token is treated as theft: the whole family
   is revoked and the request fails.
+- **Session changes are atomic** — logout-all, refresh rotation and new-session issuance wrap the
+  security-stamp change, refresh-token revocation and token insert in one transaction. A database
+  failure rolls the whole transition back instead of leaving a half-valid session.
 - **One lockout covers both factors** — the password and the TOTP/recovery-code check share
   Identity's counters, so a locked account cannot finish a 2FA challenge even with the correct
   code. Logout only revokes a token owned by the caller.
@@ -279,8 +284,9 @@ Both flows are fully implemented and opt-in, so local development stays friction
 
 Two ordering details matter:
 
-- The confirmation check runs **after** the password succeeds, so an anonymous caller cannot
-  distinguish "unconfirmed address" from "unknown address" — an enumeration oracle removed.
+- The confirmation check runs **after** the password succeeds, and login misses perform a dummy
+  password hash, so response codes and password-hash timing do not distinguish "unconfirmed
+  address" from "unknown address".
 - Refresh applies the same check, so sessions minted while confirmation was optional cannot
   outlive the flag being switched on.
 
@@ -455,7 +461,10 @@ when a required value is missing.
 | `Jwt:AccessTokenMinutes` | `15` | 1–120 |
 | `Auth:SingleSessionPerUser` | `true` | New login/refresh invalidates older sessions |
 | `Auth:RefreshTokenDays` | `30` | Refresh-token lifetime |
-| `Auth:PublicBaseUrl` | `http://localhost:8080` | Builds confirmation links; must be HTTPS in production |
+| `Auth:RefreshTokenCleanup:Enabled` | `true` | Runs the in-process retention job; disabled in integration tests |
+| `Auth:RefreshTokenCleanup:IntervalHours` | `24` | 1–168 hours between passes (plus one pass at startup) |
+| `Auth:RefreshTokenCleanup:RetentionDays` | `30` | 1–365 days to keep expired/revoked rows for investigation |
+| `Auth:PublicBaseUrl` | `http://localhost:8080` | Builds confirmation links; HTTPS required except on loopback |
 | `Auth:TwoFactorChallengeMinutes` | `5` | Lifetime of a 2FA challenge token |
 | `Identity:RequireConfirmedEmail` | `false` | Gate login/refresh on a confirmed email |
 | `Identity:EnableTwoFactor` | `false` | Expose and require TOTP |
@@ -515,7 +524,7 @@ API's `appsettings*.json`, then falls back to the Development connection string.
 
 ## Testing
 
-**113 tests: 40 unit + 73 integration.** No mocks of the data layer and no in-memory database —
+**118 tests: 40 unit + 78 integration.** No mocks of the data layer and no in-memory database —
 integration tests run against a real PostgreSQL 16 container (Testcontainers).
 
 ```bash
@@ -535,6 +544,10 @@ offset overflow, claim generation, 2FA challenge validation and refresh-token ha
   project-scoped task lists;
 - cross-tenant task-assignee rejection at the database level, including the NULL-column bypass;
 - refresh rotation, reuse detection, family revocation, expiry and concurrent rotation;
+- logout-all rollback when refresh-token revocation fails (failure injection with a Postgres trigger);
+- new-session issuance rollback when the refresh-token insert fails;
+- unknown tenant/user login responses stay identical;
+- refresh-token retention deletes only expired/long-revoked rows and keeps fresh sessions;
 - logout scoping (a caller cannot revoke another user's refresh token);
 - the last-Owner guard under concurrent cross-demotions (one request wins, the other gets
   `409 last_owner` or `401`, and one Owner remains);
@@ -565,15 +578,16 @@ about 20 seconds once the image is cached.
 
 ### Docker
 
-- Multi-stage `Dockerfile`, non-root `$APP_UID` user on `mcr.microsoft.com/dotnet/aspnet:10.0`,
+- Multi-stage `Dockerfile`, non-root `$APP_UID` user on `mcr.microsoft.com/dotnet/aspnet:11.0`,
   plain HTTP on 8080 (terminate TLS at the ingress; the app redirects to HTTPS, so
   `ForwardedHeaders` must carry the original scheme).
-- `compose.yaml` binds PostgreSQL to `127.0.0.1:5432` (loopback only) and keeps data in the
-  `postgres-data` volume, so local runs reuse one database without exposing it beyond the
-  machine. The default database password is a development convenience — override
-  `POSTGRES_PASSWORD` for anything shared.
+- `compose.yaml` binds **both PostgreSQL and the API** to `127.0.0.1` (loopback only) and keeps
+  data in the `postgres-data` volume. The demo overlay seeds known accounts, so the loopback
+  binding is part of its security boundary. The default database password is a development
+  convenience — override `POSTGRES_PASSWORD` for anything shared.
 - `JWT_SIGNING_KEY` is required by compose for **every** command (compose validates the whole
-  file, even when you only start PostgreSQL). Failing fast beats starting with an empty key.
+  file, even when you only start PostgreSQL). The example key is demo-only and safe only
+  because of the loopback binding; generate a real key before exposing the API through a proxy.
 - `compose.yaml` defaults `ASPNETCORE_ENVIRONMENT` to `Production`; `compose.demo.yaml` is a
   local-only overlay that enables demo seeding with a known password.
 - `.dockerignore` keeps `.env` and `appsettings.Development.json` out of the build context, so
@@ -598,7 +612,8 @@ about 20 seconds once the image is cached.
 
 1. **build-test** — restore (with the NuGet cache), Release build, unit tests, integration tests
    on GitHub-hosted Ubuntu runners (Docker for Testcontainers), a container-image build so a
-   broken Dockerfile fails the PR, and TRX artefacts uploaded.
+   broken Dockerfile fails the PR, ReportGenerator HTML/Cobertura output plus a coverage summary
+   in the job summary, and TRX artefacts uploaded.
 2. **publish-image** — on pushes to `main`/`master` and `v*.*.*` tags, builds and pushes
    `ghcr.io/<owner>/<repo>` with branch, SHA, semver and `latest` (default branch) tags.
 
@@ -614,7 +629,11 @@ permissions (`packages: write`) or a `CR_PAT`. Dependabot opens grouped weekly P
   included in problem details alongside ASP.NET's `traceId`.
 - **Tenant and user context** — after authentication, `TenantId` and `UserId` are pushed into
   the Serilog context, so one query can isolate a tenant's requests.
-- **Request logging** — method, path, status and elapsed time per request.
+- **Request logging** — method, path, final HTTP status and elapsed time per request. It wraps
+  exception handling, so a handled `404` is logged as `404` at Warning rather than an
+  intermediate `500` at Error; `5xx` responses log at Error.
+- **Refresh-token retention** — the hosted cleanup logs how many rows it deleted, or a warning
+  when a pass fails (the next pass retries; the API stays up).
 - **Environments** — readable console in Development; compact JSON on stdout elsewhere, which
   is natively ingestible by CloudWatch Logs and Azure Log Analytics.
 - **Application Insights** — set `Serilog:AzureMonitor:ConnectionString` and events also flow
@@ -640,25 +659,29 @@ permissions (`packages: write`) or a `CR_PAT`. Dependabot opens grouped weekly P
 | [0010](docs/adr/0010-tenant-lifecycle-scope.md) | Tenant lifecycle stays tenant-scoped |
 | [0011](docs/adr/0011-central-package-management.md) | Central Package Management for NuGet versions |
 | [0012](docs/adr/0012-dotnet-version-target.md) | Superseded: staying on .NET 10 LTS |
-| [0013](docs/adr/0013-dotnet-11-with-ef-core-10.md) | .NET 11 GA with the stable EF Core 10 data stack |
+| [0013](docs/adr/0013-dotnet-11-with-ef-core-10.md) | Superseded data-stack pin; OpenAPI constraint remains |
+| [0014](docs/adr/0014-dotnet-11-data-stack.md) | Complete the .NET 11 data-stack migration |
+| [0015](docs/adr/0015-refresh-token-retention.md) | Bounded refresh-token retention with a hosted cleanup job |
 
 ### Toolchain: .NET 11 GA, stable packages only
 
-The app targets **.NET 11** (GA, STS, supported through November 2028). Nothing is a preview,
-RC or beta. One deliberate exception: the EF Core data stack stays on **10.0.x**, because the
-Npgsql provider has no stable EF Core 11 release yet.
+The application, ASP.NET Core packages and relational data stack all target **.NET 11 GA**.
+Nothing is a preview, RC or beta. The only deliberate 10.x family is the OpenAPI integration,
+because `Asp.Versioning.OpenApi` still requires `Microsoft.OpenApi` 2.x.
 
 | Dependency | Version | Why |
 | --- | --- | --- |
 | SDK / TFM | `11.0.100` / `net11.0` | .NET 11 GA |
 | ASP.NET Core packages (`JwtBearer`, `Mvc.Testing`) | `11.0.0` | .NET 11 GA |
-| `Microsoft.EntityFrameworkCore` + Identity/health-check integrations | `10.0.13` | `Npgsql.EntityFrameworkCore.PostgreSQL` 10.0.3 declares `Microsoft.EntityFrameworkCore < 11.0.0`; the 11.0.0 line is only `11.0.0-rc.3` and pins EF Core to the RC |
-| `Npgsql.EntityFrameworkCore.PostgreSQL` | `10.0.3` | latest **stable** provider |
-| `Microsoft.AspNetCore.OpenApi` / `Asp.Versioning.OpenApi` | `10.0.13` / `10.2.3` | `Asp.Versioning.OpenApi` requires `Microsoft.OpenApi` 2.x, while ASP.NET Core OpenAPI 11 requires 3.11+; both stay on their stable 10 line |
+| EF Core + Identity/health-check integrations | `11.0.0` | Stable Npgsql 11 provider is available |
+| `Npgsql.EntityFrameworkCore.PostgreSQL` | `11.0.0` | Latest stable provider; requires EF Core 11 |
+| `Microsoft.AspNetCore.OpenApi` / `Asp.Versioning.OpenApi` | `10.0.13` / `10.2.3` | `Asp.Versioning.OpenApi` requires `Microsoft.OpenApi` 2.x, while ASP.NET Core OpenAPI 11 requires 3.11+ |
 
-Everything else is on its latest stable release (`Serilog.AspNetCore` 11.0.0, `MailKit`
-4.18.2, `Testcontainers` 4.17.0). When Npgsql ships 11.0.0, the data stack and the OpenAPI
-integration move in one CPM bump; see [ADR 0013](docs/adr/0013-dotnet-11-with-ef-core-10.md).
+Other dependencies stay on their current stable majors (`Serilog.AspNetCore` 11.0.0,
+`MailKit` 4.18.2, `Testcontainers` 4.17.0). MailKit 5 and Scalar 3 are available but are
+separate major upgrades. The data-stack move is recorded in
+[ADR 0014](docs/adr/0014-dotnet-11-data-stack.md); the remaining OpenAPI gate is recorded in
+[ADR 0013](docs/adr/0013-dotnet-11-with-ef-core-10.md).
 
 ### What changes at 10x scale
 
@@ -671,7 +694,8 @@ The design is deliberately single-node and single-database today:
 - **The per-request stamp/role lookup** (one indexed read today) gets a short-lived cache keyed
   by user + stamp, invalidated on role change/logout.
 - **Email and other side effects** move behind an outbox + background worker.
-- **Refresh-token cleanup** becomes a scheduled job instead of unbounded growth.
+- **Refresh-token cleanup** moves from the in-process daily timer to an external scheduler or a
+  PostgreSQL advisory lock when replica count or table size makes duplicate passes wasteful.
 - **Observability** graduates to OpenTelemetry traces/metrics and SLOs.
 
 ---
@@ -707,7 +731,7 @@ The design is deliberately single-node and single-database today:
 │   ├── Multitenant.Domain/            entities and invariants (one type per file)
 │   └── Multitenant.Infrastructure/
 │       ├── Email/                     logging + SMTP senders
-│       ├── Identity/                  AuthService, token manager, provisioning, JWT setup
+│       ├── Identity/                  AuthService, token manager, retention, provisioning, JWT setup
 │       ├── Persistence/               DbContext, interceptor, initializer, migrations
 │       ├── Services/                  tenant, user, project and task services
 │       └── Tenancy/                   TenantContext
@@ -731,14 +755,20 @@ Deliberate scope cuts, not oversights:
 
 - **No public sign-up.** `POST /auth/register` is admin-only; an invite or email-domain
   allow-list flow is the right next step if public sign-up is needed.
-- **Refresh tokens are not garbage-collected.** Expired/revoked rows accumulate until a
-  retention job exists.
+- **Refresh-token retention runs in-process.** The hosted job deletes rows daily by default and
+  is safe across replicas, but replicas may duplicate a pass. At larger scale, move the schedule
+  to an external job or add a PostgreSQL advisory lock ([ADR 0015](docs/adr/0015-refresh-token-retention.md)).
 - **Rate limiting is in-process.** Effective limits are per replica until a shared (Redis)
   limiter is introduced.
+- **Upstream rate-limiter test-host retention.** ASP.NET Core 11's `RateLimitingMiddleware` does
+  not dispose its partitioned limiters yet (`dotnet/aspnetcore#66434`, `#69509`). Production runs
+  one host, but repeated `WebApplicationFactory` hosts can remain retained in the test process.
 - **Permissions are role-based, not per-resource.** Project-scoped membership is a natural
   extension.
 - **No audit trail table.** Security events are logged, not persisted as domain records.
 - **Email templates are inline strings**, not a templating system.
+- **MailKit 5 and Scalar 3 are not adopted yet.** Both are stable major upgrades, but SMTP
+  compatibility and the OpenAPI 3 migration deserve a separate reviewed change.
 - **Tenant lifecycle is tenant-scoped by design.** Owners can rename their tenant, but there is
   no cross-tenant tenant list and no self-service deactivation: the API has no platform
   administrator, an exposed list would confirm other tenants exist, and an irreversible lockout

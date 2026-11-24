@@ -62,6 +62,7 @@ public sealed class IntegrationHarness : IDisposable, IAsyncLifetime
         ["Jwt:Issuer"] = "multitenant-aspnet-api",
         ["Jwt:Audience"] = "multitenant-aspnet-api",
         ["Auth:RefreshTokenDays"] = "30",
+        ["Auth:RefreshTokenCleanup:Enabled"] = "false",
         ["RateLimiting:Tenant:PermitLimit"] = "1000",
         ["RateLimiting:Auth:PermitLimit"] = "1000",
         ["Serilog:MinimumLevel:Default"] = "Warning",

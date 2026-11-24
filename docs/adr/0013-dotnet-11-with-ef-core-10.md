@@ -1,8 +1,11 @@
 # 0013 — Target .NET 11 with the stable EF Core 10 data stack
 
-- **Status:** Accepted
+- **Status:** Superseded by [0014](0014-dotnet-11-data-stack.md) for the data stack; the OpenAPI pin remains in force
 - **Date:** 2026-11-18
-- **Supersedes:** [0012](0012-dotnet-version-target.md)
+
+> **Update (2026-11-25):** Npgsql.EntityFrameworkCore.PostgreSQL 11.0.0 is now stable. ADR 0014
+> moves EF Core, Identity, health checks and Npgsql to 11.0.0. The Microsoft.OpenApi 2 /
+> Asp.Versioning.OpenApi constraint described here still applies.
 
 ## Context
 

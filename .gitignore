@@ -10,6 +10,7 @@ publish/
 
 # Test artifacts
 TestResults/
+.tools/
 coverage/
 coverage.*
 *.coverage

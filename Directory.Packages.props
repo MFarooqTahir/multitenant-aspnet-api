@@ -8,12 +8,10 @@
     Rule: add a <PackageVersion> here before adding a <PackageReference> to a
     project; the build fails with NU1010 if the version is missing.
 
-    Stable-only policy: no -preview/-rc/-alpha packages. The application targets
-    net11.0 with .NET 11 GA packages, except the EF Core data stack:
-    Npgsql.EntityFrameworkCore.PostgreSQL has no stable 11.0.0 yet (11.0.0-rc.3
-    pins EF Core to an RC), so EF Core, its Identity/health-check integrations,
-    Npgsql and the Microsoft.OpenApi 2-based Asp.Versioning.OpenApi stay on the
-    stable 10.0.x line. See docs/adr/0013-dotnet-11-with-ef-core-10.md.
+    Stable-only policy: no -preview/-rc/-alpha packages. The application and data stack
+    both target .NET 11 GA. The only remaining 10.x pin is the Microsoft.OpenApi 2-based
+    Asp.Versioning.OpenApi integration; see ADR 0014 for the data-stack upgrade and ADR 0013
+    for the remaining OpenAPI gate.
 
     The nine Microsoft.Extensions.* assemblies now in the net11.0 shared
     framework (DependencyInjection.Abstractions, Logging.Abstractions, Options,
@@ -22,14 +20,9 @@
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
 
-    <!--
-      The data-stack pins are grouped so the .NET 11 EF upgrade is one edit:
-      when Npgsql.EntityFrameworkCore.PostgreSQL 11.0.0 ships, bump DataStackVersion
-      and NpgsqlVersion together. OpenApiVersion moves once an Asp.Versioning
-      release supports Microsoft.OpenApi 3.x.
-    -->
-    <DataStackVersion>10.0.13</DataStackVersion>
-    <NpgsqlVersion>10.0.3</NpgsqlVersion>
+    <!-- Keep the coupled data-stack packages on one version. -->
+    <DataStackVersion>11.0.0</DataStackVersion>
+    <NpgsqlVersion>11.0.0</NpgsqlVersion>
     <OpenApiVersion>10.0.13</OpenApiVersion>
   </PropertyGroup>
 
@@ -45,6 +38,9 @@
     <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="$(DataStackVersion)" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="11.0.0" />
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="$(OpenApiVersion)" />
+    <!-- Roslyn 5.9.0's released packages depend on a build-numbered analyzer
+         prerelease; pin the matching stable analyzer explicitly. -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.9.0" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="$(DataStackVersion)" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="$(DataStackVersion)" />
     <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="$(DataStackVersion)" />

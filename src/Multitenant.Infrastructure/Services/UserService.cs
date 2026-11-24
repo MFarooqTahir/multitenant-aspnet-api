@@ -273,7 +273,7 @@ public sealed class UserService(
     {
         var tenantId = tenantContext.TenantId ?? throw new UnauthorizedException();
 
-        await dbContext.Database.ExecuteSqlInterpolatedAsync(
+        await dbContext.Database.ExecuteSqlAsync(
             $"SELECT 1 FROM \"Tenants\" WHERE \"Id\" = {tenantId} FOR UPDATE",
             cancellationToken);
     }

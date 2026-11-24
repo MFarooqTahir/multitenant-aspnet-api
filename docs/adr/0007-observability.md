@@ -25,6 +25,9 @@ documentation, so the logging format must be portable.
   same shape, and `ApiBehaviorOptions.InvalidModelStateResponseFactory` gives model-binding
   failures (malformed JSON, unparsable query values) the same `validation_failed` contract as
   FluentValidation. Stack traces appear only in Development.
+- **Request logs use the final status** — Serilog request logging wraps exception handling, so
+  handled 4xx responses are recorded as 4xx at Warning rather than an intermediate 500 at Error.
+  The exception handler owns exception detail; 5xx responses log at Error.
 - **CloudWatch** — no extra sink is required: the container writes JSON to stdout, which is
   the canonical CloudWatch Logs input. Structured properties are preserved as JSON keys and
   can be queried with CloudWatch Logs Insights.

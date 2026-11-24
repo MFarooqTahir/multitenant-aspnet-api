@@ -3,7 +3,7 @@
 The rules that are not obvious from the code. Setup, commands, the endpoint list, test counts
 and current status live in `README.md`; decisions and their trade-offs live in `docs/adr/`.
 Read those, plus `docs/architecture.md`, before changing tenant or auth behaviour. Start with
-ADRs 0003 (isolation), 0004 (tokens) and 0013 (toolchain).
+ADRs 0003 (isolation), 0004 (tokens), and 0013–0015 (toolchain and retention).
 
 ---
 
@@ -56,8 +56,14 @@ ADRs 0003 (isolation), 0004 (tokens) and 0013 (toolchain).
 13. **NuGet versions live in `Directory.Packages.props`, and only stable releases are allowed.**
     CPM is on: add a `<PackageVersion>` there and a bare `<PackageReference>` in the project.
     Never put a `Version` attribute on a `PackageReference` (NU1010 if the version is missing),
-    and never add a preview/RC/beta package. The `net11.0` target keeps the EF Core data stack
-    on 10.0.x until Npgsql ships 11.0.0 — the gate is in ADR 0013.
+    and never add a preview/RC/beta package. The application and data stack are on .NET 11 GA;
+    only the Microsoft.OpenApi 2 / Asp.Versioning.OpenAPI integration remains on 10.x
+    (ADR 0014).
+14. **`SaveChanges` guards do not cover set-based or raw writes.** `ExecuteUpdateAsync`,
+    `ExecuteDeleteAsync` and `ExecuteSql*` bypass `TenantAuditingInterceptor` and query filters.
+    Never use them on a tenant-owned entity without an explicit tenant predicate and an
+    integration test. Current set-based writes target only the unfiltered `RefreshTokens`
+    table; the raw SQL tenant lock is parameterized.
 
 ---
 
@@ -94,8 +100,7 @@ ADRs 0003 (isolation), 0004 (tokens) and 0013 (toolchain).
 ## Definition of done
 
 - `dotnet build multitenant-aspnet-api.slnx` has 0 warnings (warnings are errors).
-- Unit and integration tests pass; `dotnet format multitenant-aspnet-api.slnx
-  --verify-no-changes` is clean.
+- Unit and integration tests pass; `dotnet format multitenant-aspnet-api.slnx --verify-no-changes` is clean.
 - User-visible facts (endpoints, counts, status) go in `README.md`, not in these notes; a
   significant decision gets an ADR.
 - No secrets, no employer code, no `appsettings.Development.json` or `.env` in a commit.

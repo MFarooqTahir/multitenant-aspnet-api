@@ -6,6 +6,7 @@
 **/appsettings.*.Local.json
 **/*.user
 **/TestResults
+**/.tools
 **/coverage
 **/.git
 **/.gitignore

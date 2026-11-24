@@ -28,6 +28,8 @@
     <File Path="docs/adr/0011-central-package-management.md" />
     <File Path="docs/adr/0012-dotnet-version-target.md" />
     <File Path="docs/adr/0013-dotnet-11-with-ef-core-10.md" />
+    <File Path="docs/adr/0014-dotnet-11-data-stack.md" />
+    <File Path="docs/adr/0015-refresh-token-retention.md" />
     <File Path="Directory.Packages.props" />
   </Folder>
   <Folder Name="/tests/">

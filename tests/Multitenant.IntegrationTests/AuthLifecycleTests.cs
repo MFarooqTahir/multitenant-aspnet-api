@@ -49,6 +49,24 @@ public sealed class AuthLifecycleTests : IntegrationTestBase
         Assert.Contains("no-cache", pragma);
     }
 
+    [Theory]
+    [InlineData("missing-tenant", "owner@acme.test")]
+    [InlineData("acme", "missing@acme.test")]
+    public async Task UnknownTenantOrUserReturnsTheSameUnauthorizedResponse(string tenantSlug, string email)
+    {
+        using var client = CreateClient();
+
+        var response = await client.PostApi(
+            "/api/v1/auth/login",
+            new LoginRequest(tenantSlug, email, "WrongPassword1!"));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+
+        var problem = await response.ReadAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
+        Assert.Equal("unauthorized", problem.Extensions["code"]?.ToString());
+    }
+
     [Fact]
     public async Task InvalidCredentialsAreRejected()
     {
@@ -206,6 +224,120 @@ public sealed class AuthLifecycleTests : IntegrationTestBase
 
         var staleAccess = await client.GetApi("/api/v1/tenants/current", tokens.AccessToken);
         Assert.Equal(HttpStatusCode.Unauthorized, staleAccess.StatusCode);
+    }
+
+    [Fact]
+    public async Task LogoutAllRollsBackTheStampWhenRefreshTokenRevocationFails()
+    {
+        using var client = CreateClient();
+        var tokens = await Scenarios.OnboardAndLoginAsync(client, "auth-logout-atomic", "logout-atomic@acme.test");
+
+        using (var scope = Harness.Factory.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await dbContext.Database.ExecuteSqlRawAsync("""
+                BEGIN;
+                DROP TRIGGER IF EXISTS trg_reject_refresh_token_update_for_test ON "RefreshTokens";
+                CREATE OR REPLACE FUNCTION reject_refresh_token_update_for_test() RETURNS trigger AS $$
+                BEGIN
+                    IF NEW."RevokedReason" = 'logout_all' THEN
+                        RAISE EXCEPTION 'injected refresh-token revocation failure';
+                    END IF;
+                    RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql;
+                CREATE TRIGGER trg_reject_refresh_token_update_for_test
+                BEFORE UPDATE ON "RefreshTokens"
+                FOR EACH ROW EXECUTE FUNCTION reject_refresh_token_update_for_test();
+                COMMIT;
+                """);
+        }
+
+        try
+        {
+            var logoutAll = await client.PostApi("/api/v1/auth/logout-all", null, tokens.AccessToken);
+            Assert.Equal(HttpStatusCode.InternalServerError, logoutAll.StatusCode);
+
+            // Both writes belong to one transaction: the failed revocation must
+            // roll back the security-stamp change and leave the session usable.
+            var access = await client.GetApi("/api/v1/tenants/current", tokens.AccessToken);
+            Assert.Equal(HttpStatusCode.OK, access.StatusCode);
+
+            var refresh = await client.PostApi(
+                "/api/v1/auth/refresh",
+                new RefreshTokenRequest(tokens.RefreshToken));
+            Assert.Equal(HttpStatusCode.OK, refresh.StatusCode);
+        }
+        finally
+        {
+            using var scope = Harness.Factory.Services.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await dbContext.Database.ExecuteSqlRawAsync("""
+                DROP TRIGGER IF EXISTS trg_reject_refresh_token_update_for_test ON "RefreshTokens";
+                DROP FUNCTION IF EXISTS reject_refresh_token_update_for_test();
+                """);
+        }
+    }
+
+    [Fact]
+    public async Task FailedNewSessionIssuanceRollsBackOldSessionRevocation()
+    {
+        using var client = CreateClient();
+        var tokens = await Scenarios.OnboardAndLoginAsync(client, "auth-issue-atomic", "issue-atomic@acme.test");
+
+        using (var scope = Harness.Factory.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await dbContext.Database.ExecuteSqlRawAsync("""
+                BEGIN;
+                DROP TRIGGER IF EXISTS trg_reject_refresh_insert_for_test ON "RefreshTokens";
+                CREATE OR REPLACE FUNCTION reject_refresh_insert_for_test() RETURNS trigger AS $$
+                BEGIN
+                    RAISE EXCEPTION 'injected refresh-token insert failure';
+                END;
+                $$ LANGUAGE plpgsql;
+                CREATE TRIGGER trg_reject_refresh_insert_for_test
+                BEFORE INSERT ON "RefreshTokens"
+                FOR EACH ROW EXECUTE FUNCTION reject_refresh_insert_for_test();
+                COMMIT;
+                """);
+        }
+
+        try
+        {
+            var login = await client.PostApi(
+                "/api/v1/auth/login",
+                new LoginRequest("auth-issue-atomic", "issue-atomic@acme.test", Scenarios.Password));
+            Assert.Equal(HttpStatusCode.InternalServerError, login.StatusCode);
+
+            var access = await client.GetApi("/api/v1/tenants/current", tokens.AccessToken);
+            Assert.Equal(HttpStatusCode.OK, access.StatusCode);
+
+            // Remove the injected failure, then prove the old refresh token was
+            // not revoked by the rolled-back single-session transition.
+            using (var scope = Harness.Factory.Services.CreateScope())
+            {
+                var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                await dbContext.Database.ExecuteSqlRawAsync("""
+                    DROP TRIGGER IF EXISTS trg_reject_refresh_insert_for_test ON "RefreshTokens";
+                    DROP FUNCTION IF EXISTS reject_refresh_insert_for_test();
+                    """);
+            }
+
+            var refresh = await client.PostApi(
+                "/api/v1/auth/refresh",
+                new RefreshTokenRequest(tokens.RefreshToken));
+            Assert.Equal(HttpStatusCode.OK, refresh.StatusCode);
+        }
+        finally
+        {
+            using var scope = Harness.Factory.Services.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await dbContext.Database.ExecuteSqlRawAsync("""
+                DROP TRIGGER IF EXISTS trg_reject_refresh_insert_for_test ON "RefreshTokens";
+                DROP FUNCTION IF EXISTS reject_refresh_insert_for_test();
+                """);
+        }
     }
 
     [Fact]

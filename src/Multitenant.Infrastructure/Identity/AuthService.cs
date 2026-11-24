@@ -43,6 +43,11 @@ public sealed class AuthService(
     private readonly IdentityFeatureOptions _identity = identityOptions.Value;
     private readonly JwtOptions _jwt = jwtOptions.Value;
 
+    // A real Identity hash, computed once, used on login misses so an unknown
+    // tenant/user costs roughly the same password-hash time as an existing user.
+    private static readonly Lazy<string> DummyPasswordHash = new(() =>
+        new PasswordHasher<AppUser>().HashPassword(new AppUser(), "timing-oracle-dummy-password"));
+
     public async Task<LoginResult> LoginAsync(
         LoginRequest request,
         string? ipAddress,
@@ -51,6 +56,7 @@ public sealed class AuthService(
         var tenant = await FindTenantBySlugAsync(request.TenantSlug, cancellationToken);
         if (tenant is null || !tenant.IsActive)
         {
+            VerifyDummyPassword(request.Password);
             throw new UnauthorizedException();
         }
 
@@ -63,6 +69,7 @@ public sealed class AuthService(
         var user = await FindUserByEmailAsync(tenant.Id, request.Email, cancellationToken);
         if (user is null || !user.IsActive)
         {
+            VerifyDummyPassword(request.Password);
             throw new UnauthorizedException();
         }
 
@@ -219,7 +226,10 @@ public sealed class AuthService(
 
         if (_auth.SingleSessionPerUser)
         {
-            await userManager.UpdateSecurityStampAsync(user);
+            EnsureSucceeded(
+                await userManager.UpdateSecurityStampAsync(user),
+                "update the security stamp");
+
             await refreshTokenManager.RevokeAllForUserAsync(user.Id, "single_session", cancellationToken);
         }
 
@@ -261,9 +271,16 @@ public sealed class AuthService(
     {
         var user = await GetCurrentUserAsync(cancellationToken);
 
-        await userManager.UpdateSecurityStampAsync(user);
+        // The stamp invalidates access tokens and the update revokes refresh tokens.
+        // They must commit together: a partial logout-everywhere is not a safe state.
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+        EnsureSucceeded(
+            await userManager.UpdateSecurityStampAsync(user),
+            "update the security stamp");
+
         await refreshTokenManager.RevokeAllForUserAsync(user.Id, "logout_all", cancellationToken);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task ConfirmEmailAsync(Guid userId, string token, CancellationToken cancellationToken)
@@ -330,7 +347,10 @@ public sealed class AuthService(
         var key = await userManager.GetAuthenticatorKeyAsync(user);
         if (string.IsNullOrWhiteSpace(key))
         {
-            await userManager.ResetAuthenticatorKeyAsync(user);
+            EnsureSucceeded(
+                await userManager.ResetAuthenticatorKeyAsync(user),
+                "reset the authenticator key");
+
             key = await userManager.GetAuthenticatorKeyAsync(user);
         }
 
@@ -355,7 +375,9 @@ public sealed class AuthService(
         await VerifyAuthenticatorCodeAsync(user, code);
 
         user.TwoFactorEnabled = true;
-        await userManager.UpdateAsync(user);
+        EnsureSucceeded(
+            await userManager.UpdateAsync(user),
+            "enable two-factor authentication");
 
         var recoveryCodes = await userManager.GenerateNewTwoFactorRecoveryCodesAsync(user, 10) ?? [];
         return new TwoFactorEnabledResponse([.. recoveryCodes]);
@@ -368,8 +390,13 @@ public sealed class AuthService(
         await VerifyAuthenticatorCodeAsync(user, code);
 
         user.TwoFactorEnabled = false;
-        await userManager.ResetAuthenticatorKeyAsync(user);
-        await userManager.UpdateAsync(user);
+        EnsureSucceeded(
+            await userManager.ResetAuthenticatorKeyAsync(user),
+            "reset the authenticator key");
+
+        EnsureSucceeded(
+            await userManager.UpdateAsync(user),
+            "disable two-factor authentication");
     }
 
     public async Task<AuthTokens> VerifyTwoFactorAsync(
@@ -447,7 +474,10 @@ public sealed class AuthService(
             }
         }
 
-        await userManager.ResetAccessFailedCountAsync(user);
+        EnsureSucceeded(
+            await userManager.ResetAccessFailedCountAsync(user),
+            "reset the failed access count");
+
         var role = await GetRoleAsync(user);
 
         return await IssueTokensAsync(user, role, tenant.Slug, ipAddress, cancellationToken);
@@ -464,13 +494,16 @@ public sealed class AuthService(
         string? ipAddress,
         CancellationToken cancellationToken)
     {
+        // Stamp rotation, old-session revocation and the new refresh-token insert
+        // are one security state transition. A failure must not leave half of it
+        // committed (for example, old access tokens dead but old refresh tokens live).
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
         if (_auth.SingleSessionPerUser)
         {
-            var stamp = await userManager.UpdateSecurityStampAsync(user);
-            if (!stamp.Succeeded)
-            {
-                throw new InvalidOperationException("Could not update the user security stamp.");
-            }
+            EnsureSucceeded(
+                await userManager.UpdateSecurityStampAsync(user),
+                "update the security stamp");
 
             await refreshTokenManager.RevokeAllForUserAsync(user.Id, "single_session", cancellationToken);
         }
@@ -479,6 +512,7 @@ public sealed class AuthService(
         var (rawToken, _) = refreshTokenManager.Create(user, ipAddress);
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
         return new AuthTokens(accessToken.Value, rawToken, SecondsUntil(accessToken.ExpiresAtUtc));
     }
@@ -549,6 +583,21 @@ public sealed class AuthService(
 
     private int SecondsUntil(DateTimeOffset moment) =>
         Math.Max(1, (int)(moment - timeProvider.GetUtcNow()).TotalSeconds);
+
+    private void VerifyDummyPassword(string password) =>
+        _ = userManager.PasswordHasher.VerifyHashedPassword(
+            new AppUser(),
+            DummyPasswordHash.Value,
+            password);
+
+    private static void EnsureSucceeded(IdentityResult result, string operation)
+    {
+        if (!result.Succeeded)
+        {
+            throw new InvalidOperationException(
+                $"Could not {operation}: {string.Join(" ", result.Errors.Select(x => x.Description))}");
+        }
+    }
 
     private static void EnsureFeature(bool enabled)
     {

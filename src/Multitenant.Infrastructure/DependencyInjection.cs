@@ -106,6 +106,8 @@ public static class DependencyInjection
         services.AddScoped<ICurrentUser, CurrentUser>();
         services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
         services.AddScoped<RefreshTokenManager>();
+        services.AddScoped<RefreshTokenCleaner>();
+        services.AddHostedService<RefreshTokenCleanupService>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<ITenantService, TenantService>();
         services.AddScoped<ITenantFeatureService, TenantFeatureService>();
@@ -149,6 +151,11 @@ public static class DependencyInjection
             .Validate(
                 options => options.UsesSecureBaseUrl(),
                 "Auth:PublicBaseUrl must be an HTTPS URL, or plain HTTP on a loopback host for local development.")
+            .ValidateOnStart();
+
+        services.AddOptions<RefreshTokenCleanupOptions>()
+            .Bind(configuration.GetSection(RefreshTokenCleanupOptions.SectionName))
+            .ValidateDataAnnotations()
             .ValidateOnStart();
 
         services.AddOptions<IdentityFeatureOptions>()

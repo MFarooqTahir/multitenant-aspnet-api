@@ -30,6 +30,12 @@ providers) but **not** `MapIdentityApi`. Authentication is a hand-written JWT fl
   user's current security stamp and the `role` claim with the current role. Role changes,
   logout-everywhere, password resets and single-session logins therefore invalidate existing
   access tokens immediately instead of waiting for expiry.
+- **Atomic session transitions** — refresh rotation, logout-all and new-session issuance wrap
+  the security-stamp change, refresh-token revocation and token insert in one database
+  transaction. A failed revocation rolls the stamp change back; a failure-injection test uses
+  a PostgreSQL trigger to prove it.
+- **Enumeration resistance** — unknown tenant/user login paths verify a fixed dummy password
+  hash, and the confirmed-email check runs only after a successful password check.
 - **Single session (default)** — `Auth:SingleSessionPerUser=true`. A successful login or
   refresh rotates the security stamp and revokes the user's other refresh tokens, so only the
   most recent session works. Setting it to `false` allows concurrent sessions.

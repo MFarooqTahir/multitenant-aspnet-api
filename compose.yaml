@@ -25,7 +25,9 @@
       context: .
       dockerfile: src/Multitenant.Api/Dockerfile
     ports:
-      - "${API_PORT:-8080}:8080"
+      # The demo overlay seeds known accounts, so keep the API on loopback just
+      # like PostgreSQL. Put a TLS-terminating proxy in front for shared access.
+      - "127.0.0.1:${API_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -35,9 +37,9 @@
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       ASPNETCORE_HTTP_PORTS: 8080
       ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-multitenantDb};Username=${POSTGRES_USER:-multitenant-DbUser};Password=${POSTGRES_PASSWORD:-multitenant-DbPassword123!}"
-      # Required: compose refuses to start without a real key, so the stack can
-      # never run with a forged-token-friendly default. `cp .env.example .env`
-      # and generate one (openssl rand -base64 48).
+      # Demo-only known key by default. Safe only because this compose file binds
+      # the API to loopback; generate a real key before putting it behind a proxy.
+      # openssl rand -base64 48
       Jwt__SigningKey: ${JWT_SIGNING_KEY:?JWT_SIGNING_KEY must be set in .env}
       # Demo seeding is opt-in: without an explicit SEED_DEMO_DATA=true and a
       # DEMO_PASSWORD of your choosing, no accounts with known credentials exist.

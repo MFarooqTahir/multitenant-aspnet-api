@@ -15,6 +15,7 @@ using Multitenant.Infrastructure;
 using Multitenant.Infrastructure.Persistence;
 using Scalar.AspNetCore;
 using Serilog;
+using Serilog.Events;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -94,9 +95,21 @@ if (forwardedHeaders.Enabled)
 }
 
 app.UseMiddleware<CorrelationIdMiddleware>();
+
+// Request logging wraps exception handling so it sees the final ProblemDetails
+// status (404, not the intermediate 500) and does not duplicate handled stack traces.
+app.UseSerilogRequestLogging(options =>
+{
+    options.GetLevel = (httpContext, _, _) =>
+        httpContext.Response.StatusCode >= StatusCodes.Status500InternalServerError
+            ? LogEventLevel.Error
+            : httpContext.Response.StatusCode >= StatusCodes.Status400BadRequest
+                ? LogEventLevel.Warning
+                : LogEventLevel.Information;
+});
+
 app.UseExceptionHandler();
 app.UseProblemDetailsStatusCodePages();
-app.UseSerilogRequestLogging();
 
 app.UseHttpsRedirection();
 
