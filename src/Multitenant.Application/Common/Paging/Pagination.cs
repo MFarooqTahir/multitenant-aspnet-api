@@ -5,9 +5,11 @@ public static class Pagination
 {
     public const int MaxPageSize = 100;
 
+    public const int MaxPageNumber = 10_000;
+
     public static (int Page, int PageSize) Normalize(int page, int pageSize)
     {
-        var normalizedPage = page < 1 ? 1 : page;
+        var normalizedPage = Math.Clamp(page, 1, MaxPageNumber);
         var normalizedPageSize = pageSize switch
         {
             < 1 => 20,

@@ -1,0 +1,27 @@
+[extend]
+useDefault = true
+
+# The real appsettings.Development.json is git-ignored and CI separately fails if
+# it is ever tracked. Its historical committed copy used a key that has been
+# rotated; allowlist only that old path. The tracked .example template is scanned
+# normally. Purging history requires a coordinated rewrite outside this change.
+[[allowlists]]
+description = "Removed historical development config with rotated key"
+paths = [
+  '''src/Multitenant\.Api/appsettings\.Development\.json$'''
+]
+
+[[allowlists]]
+description = "Public RFC 6238 vector and non-production test HMAC key"
+regexes = [
+  '''GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ''',
+  '''integration-test-signing-key-0123456789abcdef0123456789'''
+]
+
+[[allowlists]]
+description = "Historical README token examples (already documented as placeholders)"
+commits = [
+  "e27853bb04fb90183cf9e685b1e2a9c5ff5f7500",
+  "2e11bbe9c6d370353101d2bdf8a66bb6845380a6"
+]
+paths = ['''README\.md''']

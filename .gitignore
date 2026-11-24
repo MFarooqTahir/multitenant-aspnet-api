@@ -7,6 +7,7 @@ publish/
 *.exe
 *.pdb
 *.cache
+*.binlog
 
 # Test artifacts
 TestResults/

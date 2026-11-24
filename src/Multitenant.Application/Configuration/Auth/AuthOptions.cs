@@ -28,5 +28,9 @@ public sealed class AuthOptions
     /// </summary>
     public bool UsesSecureBaseUrl() =>
         Uri.TryCreate(PublicBaseUrl, UriKind.Absolute, out var uri)
-        && (uri.Scheme == Uri.UriSchemeHttps || uri.IsLoopback);
+        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+        && (uri.Scheme == Uri.UriSchemeHttps || uri.IsLoopback)
+        && string.IsNullOrEmpty(uri.UserInfo)
+        && string.IsNullOrEmpty(uri.Query)
+        && string.IsNullOrEmpty(uri.Fragment);
 }

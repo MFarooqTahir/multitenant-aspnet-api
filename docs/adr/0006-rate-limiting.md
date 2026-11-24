@@ -28,6 +28,8 @@ stricter named policy:
   legitimate sessions. Register is already tenant-scoped by the global partition; refresh
   falls back to the IP partition until a tenant is known. Both remain bounded, just not at
   the login-sized limit.
+- **Health probes get a separate per-IP global partition.** They do not consume a tenant's
+  API budget, but readiness checks still cannot drive unlimited database queries.
 
 Options are resolved per request from `IOptions<RateLimitingOptions>`, so configuration
 overrides (including test hosts) take effect without rebuilding the policy.

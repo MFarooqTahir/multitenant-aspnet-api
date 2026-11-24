@@ -37,8 +37,7 @@ public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<App
 
     private static IConfigurationRoot BuildConfiguration()
     {
-        var builder = new ConfigurationBuilder()
-            .AddEnvironmentVariables();
+        var builder = new ConfigurationBuilder();
 
         var apiDirectory = FindApiDirectory();
         if (apiDirectory is not null)
@@ -47,6 +46,10 @@ public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<App
             builder.AddJsonFile("appsettings.json", optional: true);
             builder.AddJsonFile("appsettings.Development.json", optional: true);
         }
+
+        // Environment variables are the final provider, matching the runtime host:
+        // an explicit ConnectionStrings__Postgres must win over local JSON files.
+        builder.AddEnvironmentVariables();
 
         return builder.Build();
     }

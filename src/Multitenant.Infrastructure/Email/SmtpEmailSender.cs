@@ -59,14 +59,14 @@ public sealed partial class SmtpEmailSender(
         await client.SendAsync(mime, cancellationToken);
         await client.DisconnectAsync(quit: true, cancellationToken);
 
-        LogSent(logger, message.ToAddress, message.Subject, smtp.Host);
+        LogSent(logger, message.Subject, smtp.Host);
     }
 
     [LoggerMessage(
         EventId = 1002,
         Level = LogLevel.Information,
-        Message = "Sent email to {ToAddress} with subject {Subject} via {Host}.")]
-    private static partial void LogSent(ILogger logger, string toAddress, string subject, string host);
+        Message = "Sent email with subject {Subject} via {Host}.")]
+    private static partial void LogSent(ILogger logger, string subject, string host);
 
     [LoggerMessage(
         EventId = 1003,

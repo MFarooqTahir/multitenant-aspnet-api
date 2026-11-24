@@ -7,6 +7,6 @@ public sealed class TwoFactorEnableRequestValidator : AbstractValidator<TwoFacto
 {
     public TwoFactorEnableRequestValidator()
     {
-        RuleFor(x => x.Code).NotEmpty().MaximumLength(32);
+        RuleFor(x => x.Code).NotEmpty().Matches(@"^[0-9]{6}$");
     }
 }

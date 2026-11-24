@@ -14,11 +14,15 @@ value after the retention window.
 Add an in-process retention job:
 
 - `RefreshTokenCleanupOptions` under `Auth:RefreshTokenCleanup` controls `Enabled`,
-  `IntervalHours` (default 24) and `RetentionDays` (default 30), all validated at startup.
+  `IntervalHours` (default 24), `RetentionDays` (default 30), `BatchSize` (default 1,000) and
+  `MaxBatchesPerPass` (default 100), all validated at startup.
 - `RefreshTokenCleanupService` is a `BackgroundService`. It runs once at startup and then on a
   `PeriodicTimer`, creates a DI scope for each pass, and uses `RefreshTokenCleaner`.
 - The cleaner deletes rows whose expiry is at least 30 days old, or whose revocation is at
-  least 30 days old, using a set-based `ExecuteDeleteAsync`.
+  least 30 days old, in bounded ID batches using `ExecuteDeleteAsync`. Leading expiry/revocation
+  indexes support the scan.
+- Refresh tokens use a composite `(TenantId, UserId)` foreign key, so a token can never point at
+  a user in another tenant even if application code is bypassed.
 - A failed pass is logged and retried on the next tick. It never escapes `ExecuteAsync`, because
   .NET 11 stops the host when a `BackgroundService` throws.
 - The job is disabled in the integration-test host; the cleaner itself is tested against real

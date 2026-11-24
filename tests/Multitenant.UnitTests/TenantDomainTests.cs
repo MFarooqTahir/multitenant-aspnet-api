@@ -9,8 +9,12 @@ public sealed class TenantDomainTests
     {
         [Theory]
         [InlineData("acme", true)]
+        [InlineData("ABC", true)]
+        [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", true)]
+        [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false)]
         [InlineData("ACME", true)]
         [InlineData("a", false)]
+        [InlineData("ab", false)]
         [InlineData("acme inc", false)]
         [InlineData("ac--me", false)]
         [InlineData("-acme", false)]
@@ -51,13 +55,13 @@ public sealed class TenantDomainTests
     public class PasswordRulesTests
     {
         [Theory]
-        [InlineData("Password1!", false)] // missing lowercase
-        [InlineData("password1!", false)] // missing uppercase
-        [InlineData("PASSWORD1!", false)] // missing lowercase
-        [InlineData("Password!1", false)] // missing digit
-        [InlineData("Password123", false)] // no symbol
-        [InlineData("P w1!aaaa", false)] // whitespace
-        [InlineData("Short1!aaaa", false)]
+        [InlineData("PASSWORD12!AB", false)] // missing lowercase
+        [InlineData("password12!ab", false)] // missing uppercase
+        [InlineData("Password!abcd", false)] // missing digit
+        [InlineData("Password123ab", false)] // no symbol
+        [InlineData("Pass word1!a", false)] // whitespace
+        [InlineData("Str0ng!aaaa", false)] // one character below minimum
+        [InlineData("Password1!aa", true)] // exact minimum
         [InlineData("V3ryStrong!Pass", true)]
         public void ValidatesPasswordStrength(string password, bool expected)
         {
@@ -65,9 +69,17 @@ public sealed class TenantDomainTests
         }
 
         [Fact]
-        public void RequiresMinimumLength()
+        public void PasswordRules_ExactMinimumAndMaximumLengths_AreAccepted()
         {
-            Assert.False(PasswordRules.IsValid("Str0ng!Pass"));
+            Assert.True(PasswordRules.IsValid("Password1!aa"));
+            Assert.True(PasswordRules.IsValid("Aa1!" + new string('a', 124)));
+        }
+
+        [Fact]
+        public void PasswordRules_AdjacentLengthsOutsideRange_AreRejected()
+        {
+            Assert.False(PasswordRules.IsValid("Str0ng!aaaa"));
+            Assert.False(PasswordRules.IsValid("Aa1!" + new string('a', 125)));
         }
     }
 }

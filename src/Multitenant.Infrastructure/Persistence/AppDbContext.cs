@@ -89,6 +89,7 @@ public sealed class AppDbContext(
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasQueryFilter(x => x.TenantId == CurrentTenantId);
+            entity.Property<uint>("xmin").IsRowVersion();
         });
 
         builder.Entity<WorkItem>(entity =>
@@ -130,6 +131,7 @@ public sealed class AppDbContext(
                 .OnDelete(DeleteBehavior.SetNull);
 
             entity.HasQueryFilter(x => x.TenantId == CurrentTenantId);
+            entity.Property<uint>("xmin").IsRowVersion();
         });
 
         builder.Entity<RefreshToken>(entity =>
@@ -146,10 +148,14 @@ public sealed class AppDbContext(
             entity.HasIndex(x => x.UserId);
             entity.HasIndex(x => x.FamilyId);
             entity.HasIndex(x => new { x.UserId, x.ExpiresAtUtc });
+            entity.HasIndex(x => x.ExpiresAtUtc);
+            entity.HasIndex(x => x.RevokedAtUtc)
+                .HasFilter("\"RevokedAtUtc\" IS NOT NULL");
 
             entity.HasOne<AppUser>()
                 .WithMany()
-                .HasForeignKey(x => x.UserId)
+                .HasForeignKey(x => new { x.TenantId, x.UserId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

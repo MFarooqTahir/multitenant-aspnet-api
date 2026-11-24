@@ -2,9 +2,8 @@ namespace Multitenant.Api.Endpoints;
 
 /// <summary>
 /// Minimal browser page used by the confirmation email. The link puts the token in
-/// the URL fragment (which browsers never send to the server), and this page reads
-/// it client-side and POSTs it to the API so the token does not land in proxy logs,
-/// browser history, or Referer headers.
+/// the URL fragment (which browsers never send to the server); this page removes
+/// the fragment immediately and POSTs the token in the request body.
 /// </summary>
 public static class ConfirmEmailPage
 {
@@ -40,6 +39,10 @@ public static class ConfirmEmailPage
               const params = new URLSearchParams(window.location.hash.slice(1));
               const userId = params.get('userId');
               const token = params.get('token');
+
+              // Fragments are not sent to servers, but they remain in browser
+              // history. Remove the credentials from the visible URL immediately.
+              history.replaceState(null, '', window.location.pathname + window.location.search);
 
               if (!userId || !token) {
                 status.textContent = 'This confirmation link is missing its token.';

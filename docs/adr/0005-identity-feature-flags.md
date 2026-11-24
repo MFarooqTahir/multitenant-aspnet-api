@@ -26,9 +26,11 @@ runs after the password succeeds, and `RefreshAsync` applies it as well so sessi
 while confirmation was optional cannot outlive the flag being switched on. The authenticator
 token provider still comes from Identity's options.
 
-Email delivery is provider-based: `Logging` (default, writes the message to the log) and
-`Smtp` (MailKit, configured under `Email:Smtp`). Swapping to SES or Azure Communication
-Services means adding one `IEmailSender` implementation.
+Email delivery is provider-based: `Logging` (default, writes a token-redacted message to the
+log) and `Smtp` (MailKit, configured under `Email:Smtp`). Confirmation links carry the token in
+a URL fragment; the browser page removes it before posting the token in the request body.
+Delivery is inline, so an outbox remains the next reliability/timing improvement. Swapping to
+SES or Azure Communication Services means adding one `IEmailSender` implementation.
 
 ## Consequences
 

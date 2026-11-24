@@ -15,8 +15,8 @@ public sealed class OnboardTenantRequestValidator : AbstractValidator<OnboardTen
             .WithMessage(TenantSlug.Description);
 
         RuleFor(x => x.Name)
-            .NotEmpty()
-            .Length(2, 120);
+            .Must(name => name?.Trim().Length is >= 2 and <= 120)
+            .WithMessage("Name must be between 2 and 120 characters after trimming.");
 
         RuleFor(x => x.OwnerEmail)
             .NotEmpty()
@@ -24,11 +24,12 @@ public sealed class OnboardTenantRequestValidator : AbstractValidator<OnboardTen
             .MaximumLength(256);
 
         RuleFor(x => x.OwnerDisplayName)
-            .NotEmpty()
-            .Length(2, 80);
+            .Must(name => name?.Trim().Length is >= 2 and <= 80)
+            .WithMessage("Owner display name must be between 2 and 80 characters after trimming.");
 
         RuleFor(x => x.OwnerPassword)
             .NotEmpty()
+            .MaximumLength(PasswordRules.MaximumLength)
             .Must(PasswordRules.IsValid)
             .WithMessage(PasswordRules.Description);
     }

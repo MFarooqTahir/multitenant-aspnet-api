@@ -8,6 +8,7 @@ public sealed class UserQueryValidator : AbstractValidator<UserQuery>
 {
     public UserQueryValidator()
     {
+        RuleFor(x => x.Search).MaximumLength(200);
         RuleFor(x => x.Role)
             .Must(role => string.IsNullOrWhiteSpace(role) || TenantRoles.IsValid(role))
             .WithMessage($"Role must be one of: {string.Join(", ", TenantRoles.All)}.");

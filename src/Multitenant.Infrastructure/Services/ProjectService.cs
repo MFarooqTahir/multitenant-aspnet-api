@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Multitenant.Application.Abstractions.Tenancy;
 using Multitenant.Application.Common.Paging;
+using Multitenant.Application.Common.Search;
 using Multitenant.Application.Contracts.Common;
 using Multitenant.Application.Contracts.Projects;
 using Multitenant.Application.Errors.Exceptions;
@@ -32,10 +33,10 @@ public sealed class ProjectService(
 
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
-            var search = $"%{query.Search.Trim()}%";
+            var search = SearchPattern.Contains(query.Search);
             projects = projects.Where(x =>
-                EF.Functions.ILike(x.Name, search)
-                || EF.Functions.ILike(x.Description ?? string.Empty, search));
+                EF.Functions.ILike(x.Name, search, SearchPattern.EscapeCharacter)
+                || EF.Functions.ILike(x.Description ?? string.Empty, search, SearchPattern.EscapeCharacter));
         }
 
         if (query.Status is not null)
@@ -48,10 +49,10 @@ public sealed class ProjectService(
 
         projects = field switch
         {
-            "name" => descending ? projects.OrderByDescending(x => x.Name) : projects.OrderBy(x => x.Name),
-            "status" => descending ? projects.OrderByDescending(x => x.Status) : projects.OrderBy(x => x.Status),
-            "updatedat" => descending ? projects.OrderByDescending(x => x.UpdatedAtUtc) : projects.OrderBy(x => x.UpdatedAtUtc),
-            _ => descending ? projects.OrderByDescending(x => x.CreatedAtUtc) : projects.OrderBy(x => x.CreatedAtUtc),
+            "name" => descending ? projects.OrderByDescending(x => x.Name).ThenByDescending(x => x.Id) : projects.OrderBy(x => x.Name).ThenBy(x => x.Id),
+            "status" => descending ? projects.OrderByDescending(x => x.Status).ThenByDescending(x => x.Id) : projects.OrderBy(x => x.Status).ThenBy(x => x.Id),
+            "updatedat" => descending ? projects.OrderByDescending(x => x.UpdatedAtUtc).ThenByDescending(x => x.Id) : projects.OrderBy(x => x.UpdatedAtUtc).ThenBy(x => x.Id),
+            _ => descending ? projects.OrderByDescending(x => x.CreatedAtUtc).ThenByDescending(x => x.Id) : projects.OrderBy(x => x.CreatedAtUtc).ThenBy(x => x.Id),
         };
 
         var items = await projects

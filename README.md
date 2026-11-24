@@ -97,13 +97,13 @@ dotnet test tests/Multitenant.IntegrationTests --filter "FullyQualifiedName~Tena
 | Atomic session transitions, proved by failure-injection rollback | `AuthService`, `LogoutAllRollsBackTheStampWhenRefreshTokenRevocationFails`, `FailedNewSessionIssuanceRollsBackOldSessionRevocation` |
 | Bounded refresh-token retention with a resilient hosted job | [ADR 0015](docs/adr/0015-refresh-token-retention.md), `RefreshTokenCleanupTests` |
 | Policy-based authorization with a three-role hierarchy | `Policies`, `AuthorizationRulesTests` |
-| EF Core global query filters, composite keys, interceptors, one squashed migration | `Persistence/` |
+| EF Core global query filters, composite keys, interceptors, `xmin` concurrency and migrations | `Persistence/` |
 | RFC 7807 error modelling with stable machine codes | `GlobalExceptionHandler`, `ProblemDetailsStatusCodePages` |
 | Per-tenant and per-IP rate limiting | [ADR 0006](docs/adr/0006-rate-limiting.md), `RateLimitingSetup` |
 | Per-tenant feature flags with whitelisted keys | [ADR 0009](docs/adr/0009-per-tenant-feature-flags.md), `TenantFeatureTests` |
 | Tenant rename with an immutable login slug | [ADR 0010](docs/adr/0010-tenant-lifecycle-scope.md), `TenantManagementTests` |
 | FluentValidation, fail-closed at startup | `Validation/`, `ValidationFilterAssertion` |
-| 118 tests: 40 unit + 78 integration, Testcontainers against real PostgreSQL | [Testing](#testing) |
+| 304 tests: 64 unit + 240 integration, Testcontainers against real PostgreSQL | [Testing](#testing) |
 | Clean layering, one-way dependencies, no business logic in controllers | [ADR 0002](docs/adr/0002-layered-solution.md) |
 | Docker multi-stage image, compose stack, CI publishing to GHCR and coverage reporting | [Operations](#operations), `.github/workflows/ci.yml` |
 | Correlation ids, Serilog JSON logging, optional App Insights | [ADR 0007](docs/adr/0007-observability.md) |
@@ -117,16 +117,18 @@ non-obvious decision is written down as an ADR.
 
 ### Prerequisites
 
-- [.NET SDK 11.0.100](global.json) (`rollForward: latestFeature`)
+- [.NET SDK 11.0.100](global.json) (`rollForward: latestPatch`)
 - Docker Desktop (or any PostgreSQL 16 you own)
-- Optional: `dotnet-ef` (`dotnet tool install --global dotnet-ef --version 11.*`)
+- Optional EF CLI: repository-local and pinned (`dotnet tool restore`)
 
 ### Run it locally (recommended)
 
 ```bash
-# 1. One-time: create .env with a real signing key (compose requires it for every command)
+# 1. One-time: create local configuration (both targets are git-ignored)
 cp .env.example .env
-openssl rand -base64 48          # paste into JWT_SIGNING_KEY
+cp src/Multitenant.Api/appsettings.Development.json.example \
+   src/Multitenant.Api/appsettings.Development.json
+openssl rand -base64 48          # paste into JWT_SIGNING_KEY for Docker
 #   Windows alternative:
 #   $b = New-Object byte[] 48; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
 #   [Convert]::ToBase64String($b)
@@ -138,9 +140,10 @@ docker compose up -d postgres
 dotnet run --project src/Multitenant.Api --launch-profile http
 ```
 
-`.env.example` already uses the development database password that the sample
-`appsettings.Development.json` connects with. If you change `POSTGRES_PASSWORD`, change the
-connection string to match; the API and the container must agree.
+`.env.example` and `appsettings.Development.json.example` already use the same development
+database password. If you change `POSTGRES_PASSWORD`, change the connection string to match;
+the API and the container must agree. The template's signing key and demo password are
+local-only conveniences — never reuse them outside loopback development.
 
 Then open <http://localhost:5270/scalar> and log in as `owner@acme.test` / `Demo123!Passw0rd`.
 
@@ -149,8 +152,8 @@ What happens on first start:
 - `src/Multitenant.Api/appsettings.Development.json` (git-ignored, see
   [Configuration](#configuration)) supplies the connection string — the same credentials as the
   compose container, so Docker and `dotnet run` share one database.
-- `Database:AutoMigrate=true` applies the single squashed `InitialCreate` migration (creating
-  the database if it does not exist).
+- `Database:AutoMigrate=true` applies all pending migrations (creating the database if it does
+  not exist).
 - `Database:SeedDemoData=true` + `Demo:Password` insert the demo tenants once; later starts
   detect the existing slugs and leave them untouched.
 - Subsequent runs reuse exactly the same database and data. `docker compose down -v` is the
@@ -225,18 +228,26 @@ One database, many tenants. No single layer is trusted to be the only one:
 
 1. **The tenant is never a client input for authenticated calls.** `JwtBearerConfiguration`
    reads `tenant_id` from the validated token and resolves the tenant context before any
-   query runs. Anonymous flows (login, refresh, onboarding) resolve it from the slug or the
-   refresh token — never from a header the caller could forge.
-2. **Reads are filtered.** `AppUser`, `Project` and `WorkItem` carry global EF Core query
-   filters on `TenantId`, keyed off a `DbContext` property (never a captured service, which
-   would freeze the first request's tenant into EF's model cache).
-3. **Writes are guarded.** `TenantAuditingInterceptor` stamps the resolved tenant on inserts
-   and rejects any insert, update or delete that targets a different tenant.
+   tenant-filtered query or tracked write. Anonymous flows resolve it from the slug, a globally
+   unique user id, or the refresh token — never from a header the caller could forge. Refresh
+   lookup/reuse revocation happens before resolution against the unfiltered token table, with an
+   explicit `TenantId` predicate on every set-based revocation.
+2. **Reads are filtered.** Once the tenant is resolved, `AppUser`, `Project`, `WorkItem` and
+   `TenantFeature` carry global EF Core query filters on `TenantId`, keyed off a `DbContext`
+   property (never a captured service, which would freeze the first request's tenant into EF's
+   model cache). `RefreshTokens` is deliberately unfiltered and always queried by a unique hash
+   or scoped by `TenantId`.
+3. **Tracked writes are guarded.** `TenantAuditingInterceptor` stamps the resolved tenant on
+   inserts, rejects any insert, update or delete that targets a different tenant, and rejects
+   changes to an existing row's `TenantId`. Set-based refresh-token operations bypass this
+   interceptor and therefore carry explicit `TenantId` predicates; retention is intentionally
+   global.
 4. **The database itself knows about tenancy.** Composite foreign keys on `(TenantId, Id)` for
-   projects and task assignees, plus `CK_WorkItems_AssigneeTenant` requiring both assignee
-   columns to be set together with `AssigneeTenantId = TenantId`. The composite key is MATCH
-   SIMPLE, so a NULL would otherwise skip the reference check entirely. Cross-tenant links are
-   impossible even with raw SQL, not just through the API.
+   projects, task assignees and refresh tokens, plus `CK_WorkItems_AssigneeTenant` requiring both
+   assignee columns to be set together with `AssigneeTenantId = TenantId`. The composite key is
+   MATCH SIMPLE, so a NULL would otherwise skip the reference check entirely. Cross-tenant links
+   are impossible even with raw SQL, not just through the API. `TenantId` is also immutable after
+   insert at the EF write-guard layer.
 5. **The API hides existence.** Cross-tenant ids return `404`, never `403`, so the API does not
    confirm that a resource exists in another tenant.
 
@@ -265,8 +276,8 @@ still required.
 - **One lockout covers both factors** — the password and the TOTP/recovery-code check share
   Identity's counters, so a locked account cannot finish a 2FA challenge even with the correct
   code. Logout only revokes a token owned by the caller.
-- **Token responses are never cached** — login, refresh and 2FA verification return
-  `Cache-Control: no-store` and `Pragma: no-cache`.
+- **Token responses are never cached** — login, refresh, 2FA setup/enable and 2FA verification
+  return `Cache-Control: no-store` and `Pragma: no-cache`.
 - **Single session by default** — `Auth:SingleSessionPerUser=true` rotates the stamp on login
   and revokes all other refresh tokens, so only the newest session survives. Set `false` for
   multi-device use.
@@ -280,7 +291,7 @@ Both flows are fully implemented and opt-in, so local development stays friction
 | Setting | Default | Effect when `true` |
 | --- | --- | --- |
 | `Identity:RequireConfirmedEmail` | `false` | Login and refresh require a confirmed email (`403 email_not_confirmed`) |
-| `Identity:EnableTwoFactor` | `false` | TOTP setup/enable/disable/verify endpoints are exposed; login issues a 2FA challenge |
+| `Identity:EnableTwoFactor` | `false` | Enable TOTP setup/enable/disable/verify and require a challenge at login; endpoints stay routed but return `404 feature_disabled` when false |
 
 Two ordering details matter:
 
@@ -291,9 +302,10 @@ Two ordering details matter:
   outlive the flag being switched on.
 
 Confirmation links always work, even with the flag off: the token rides in a URL fragment, and
-the `/confirm-email` page POSTs `{ "userId", "token" }` in the request body — never a query
-string — so proxies, browser history and `Referer` never capture it. Resend is always `202` and
-cannot be used to probe which addresses exist.
+the `/confirm-email` page removes that fragment before it POSTs `{ "userId", "token" }` in the
+request body — never a query string. Proxies and `Referer` headers never receive the token.
+Resend is always `202`; its status cannot be used to probe which addresses exist. Delivery is
+inline, so response time is not an enumeration-safe signal (an outbox is the planned next step).
 
 ### Authorization
 
@@ -301,12 +313,13 @@ cannot be used to probe which addresses exist.
 | --- | --- |
 | `Owner` | Everything: manage Owners, users, projects, tasks; last-Owner protection |
 | `Admin` | Manage users (except Owners), manage projects, delete tasks |
-| `Member` | Read tenant data, create and update tasks, manage own profile |
+| `Member` | Read tenant data, create and update tasks |
 
 - Policies live in `Policies` (`manage_tenant`, `owner_only`, `member`); business rules such as
   "the last Owner cannot be demoted or deleted" live in `UserService`, not in controllers.
 - That guard is race-proof: it runs inside a transaction holding a row lock on the tenant, so
-  two concurrent demotions cannot both pass.
+  two concurrent demotions cannot both pass. User creation, registration, tenant rename and
+  feature changes take the same lock before re-reading the caller's live role.
 - `POST /auth/register` adds a `Member` to the caller's **own** tenant and requires
   Owner/Admin. Anonymous joining by slug is deliberately not supported — a slug is not a
   credential ([ADR 0008](docs/adr/0008-admin-only-registration.md)). Public sign-up, if a
@@ -323,11 +336,13 @@ and `correlationId`:
 
 | Status | Codes (examples) | Meaning |
 | --- | --- | --- |
-| 400 | `validation_failed` | Request failed FluentValidation **or** model binding (malformed JSON, unparsable query value) |
+| 400 | `validation_failed`, `invalid_confirmation_token`, `invalid_request` | Invalid body, query or credential token |
 | 401 | `invalid_refresh_token`, `invalid_two_factor_challenge` | Bad or expired credentials |
 | 403 | `email_not_confirmed`, `role_not_allowed`, `tenant_mismatch`, `self_role_change` | Authenticated but not allowed |
 | 404 | `feature_disabled`, missing/foreign resource | Unknown or cross-tenant target |
-| 409 | `email_taken`, `last_owner`, `slug_taken` | Conflict with existing state |
+| 409 | `email_taken`, `last_owner`, `slug_taken`, `concurrency_conflict` | Conflict with existing state or a stale write |
+| 413 | `payload_too_large` | Request body exceeds the endpoint limit |
+| 415 | `unsupported_media_type` | Unsupported request content type |
 | 429 | `rate_limited` | Budget exhausted (`Retry-After` included) |
 
 Stack traces are only returned in Development.
@@ -384,7 +399,7 @@ version at `/openapi/v1.json`; interactive docs at `/scalar`.
 | POST | `/auth/logout-all` | bearer | Revoke all sessions and access tokens |
 | POST | `/auth/confirm-email` | anonymous | Complete confirmation (`{ userId, token }` body) |
 | POST | `/auth/resend-confirmation` | anonymous, IP-limited | Re-send the confirmation email (always `202`) |
-| POST | `/auth/2fa/setup` | bearer | Create an authenticator key + `otpauth://` URI |
+| POST | `/auth/2fa/setup` | bearer | Rotate and return a new authenticator key; rejects already-enrolled users |
 | POST | `/auth/2fa/enable` | bearer | Verify the first TOTP code, return recovery codes |
 | POST | `/auth/2fa/disable` | bearer | Verify a code, disable 2FA |
 | POST | `/auth/2fa/verify` | anonymous, IP-limited | Complete a 2FA login |
@@ -431,16 +446,19 @@ version at `/openapi/v1.json`; interactive docs at `/scalar`.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| GET | `/health`, `/health/live`, `/health/ready` | Anonymous health checks, exempt from rate limiting |
+| GET | `/health`, `/health/live`, `/health/ready` | Anonymous health checks with a separate per-IP budget |
 | GET | `/openapi/v1.json` | Versioned OpenAPI document |
 | GET | `/scalar` | Interactive API docs |
 | GET | `/confirm-email` | Page served for emailed confirmation links |
 
-**Conventions.** Pagination uses `page`/`pageSize` (normalized, capped). Sorting uses `field`
-for ascending and `-field` for descending, restricted to a per-resource whitelist. Search is
-case-insensitive (`ILIKE`). Validation failures return `400` with a `validation_failed` code and
-per-field details; startup fails if any endpoint lacks a registered validator, so validation
-cannot fail open.
+**Conventions.** Pagination uses `page`/`pageSize` (page capped at 10,000; page size at 100).
+Sorting uses `field` for ascending and `-field` for descending, restricted to a per-resource
+whitelist. Search is case-insensitive (`ILIKE`) and treats `%`, `_` and `\` literally. Name,
+title, display-name and description lengths are validated after trimming; search and email caps
+apply to the raw input. Passwords are 12–128 characters. JSON bodies are capped at 64 KiB
+globally and 16 KiB on credential/onboarding endpoints. Validation failures return `400` with a
+`validation_failed` code and per-field details; startup fails if any endpoint lacks a registered
+validator, so validation cannot fail open.
 
 ---
 
@@ -464,67 +482,68 @@ when a required value is missing.
 | `Auth:RefreshTokenCleanup:Enabled` | `true` | Runs the in-process retention job; disabled in integration tests |
 | `Auth:RefreshTokenCleanup:IntervalHours` | `24` | 1–168 hours between passes (plus one pass at startup) |
 | `Auth:RefreshTokenCleanup:RetentionDays` | `30` | 1–365 days to keep expired/revoked rows for investigation |
+| `Auth:RefreshTokenCleanup:BatchSize` | `1000` | 100–10,000 rows per delete statement |
+| `Auth:RefreshTokenCleanup:MaxBatchesPerPass` | `100` | 1–100 batches per startup/scheduled pass |
 | `Auth:PublicBaseUrl` | `http://localhost:8080` | Builds confirmation links; HTTPS required except on loopback |
 | `Auth:TwoFactorChallengeMinutes` | `5` | Lifetime of a 2FA challenge token |
 | `Identity:RequireConfirmedEmail` | `false` | Gate login/refresh on a confirmed email |
-| `Identity:EnableTwoFactor` | `false` | Expose and require TOTP |
+| `Identity:EnableTwoFactor` | `false` | Enable TOTP; endpoints return `404 feature_disabled` when disabled |
 | `Email:Provider` | `Logging` | `Logging` or `Smtp` |
 | `Email:FromAddress` / `FromName` | `no-reply@multitenant.local` / `Multitenant API` | Sender identity |
 | `Email:Smtp:Host` | empty | Required when the provider is `Smtp` |
-| `Email:Smtp:Port` / `UseStartTls` | `587` / `true` | `false` logs a plaintext warning |
-| `Email:Smtp:Username` / `Password` | empty | Optional SMTP auth |
+| `Email:Smtp:Port` / `UseStartTls` | `587` / `true` | Port 1–65535; non-Development requires TLS except for loopback SMTP |
+| `Email:Smtp:Username` / `Password` | empty | Optional SMTP auth; username and password must be configured together |
 | `RateLimiting:Tenant:PermitLimit` / `WindowSeconds` | `120` / `60` | Per-tenant budget |
 | `RateLimiting:Auth:PermitLimit` / `WindowSeconds` | `10` / `60` | Per-IP budget on auth endpoints |
 | `Database:AutoMigrate` | `false` | Apply migrations on startup (dev/demo) |
-| `Database:SeedDemoData` | `false` | Seed roles + demo tenants; requires `Demo:Password`, fails fast without it |
+| `Database:SeedDemoData` | `false` | Seed the `acme`/`globex` demo tenants; roles are always ensured; requires `Demo:Password` |
 | `Demo:Password` | empty | Password for seeded demo users |
-| `Cors:AllowedOrigins` | `[]` | Empty disables CORS; standard headers/methods only, credentials disabled |
-| `ForwardedHeaders:Enabled` | `false` | Trust proxies/ networks so rate limiting and logs see the real client IP |
+| `Cors:AllowedOrigins` | `[]` | Empty disables CORS; explicit HTTPS origins (HTTP loopback allowed), credentials disabled |
+| `ForwardedHeaders:Enabled` | `false` | Trust proxies/networks so rate limiting and logs see the real client IP |
+| `ForwardedHeaders:ForwardLimit` | `1` | Number of proxies to walk, 1–20 |
 | `Serilog:MinimumLevel:*` | `Information` | Standard Serilog overrides |
-| `Serilog:AzureMonitor:ConnectionString` | empty | Also send logs to Application Insights |
+| `Serilog:AzureMonitor:ConnectionString` | empty | Also send logs to Application Insights outside Development |
 
-A minimal local `appsettings.Development.json` for `dotnet run`:
+For local `dotnet run`, copy the tracked sanitized template:
 
-```json
-{
-  "ConnectionStrings": { "Postgres": "Host=localhost;Port=5432;Database=multitenantDb;Username=multitenant-DbUser;Password=multitenant-DbPassword123!" },
-  "Jwt": { "SigningKey": "<32+ character random string>" },
-  "Auth": { "PublicBaseUrl": "http://localhost:5270" },
-  "Demo": { "Password": "Demo123!Passw0rd" },
-  "Database": { "AutoMigrate": true, "SeedDemoData": true }
-}
+```bash
+cp src/Multitenant.Api/appsettings.Development.json.example \
+   src/Multitenant.Api/appsettings.Development.json
 ```
 
 `Auth:PublicBaseUrl` must match the URL the API actually listens on, or confirmation links
 point at the wrong port. Outside development the URL must be HTTPS (plain HTTP is accepted
-only on a loopback host). These values are for local development only; production must come
-from a secret store.
+only on a loopback host). The template values are for local development only; production must
+come from a secret store.
 
 ### Migrations
 
-The schema starts from a squashed `InitialCreate` migration covering every table, index,
-alternate key and check constraint; later changes are added on top (`TenantFeatures` is the
-first). Change the model, then add a migration:
+The schema starts from a squashed `InitialCreate` migration. Later migrations add
+`TenantFeatures`, replace the refresh-token foreign key with the tenant-safe composite key and
+retention indexes (`RefreshTokenIntegrityAndRetention`), and record the no-DDL
+`OptimisticConcurrencyTokens` model update. Change the model, then add a migration:
 
 ```bash
-dotnet ef migrations add <Name> \
+dotnet tool restore
+dotnet tool run dotnet-ef migrations add <Name> \
   --project src/Multitenant.Infrastructure \
   --startup-project src/Multitenant.Infrastructure \
   --output-dir Persistence/Migrations
 
-dotnet ef database update \
+dotnet tool run dotnet-ef database update \
   --project src/Multitenant.Infrastructure \
   --startup-project src/Multitenant.Infrastructure
 ```
 
-The design-time factory reads `ConnectionStrings__Postgres` from the environment, then the
-API's `appsettings*.json`, then falls back to the Development connection string.
+The design-time factory reads the API's `appsettings*.json` files and then applies environment
+variables, so `ConnectionStrings__Postgres` wins over local JSON. It falls back to the documented
+loopback Development connection string only when no value is configured.
 
 ---
 
 ## Testing
 
-**118 tests: 40 unit + 78 integration.** No mocks of the data layer and no in-memory database —
+**304 tests: 64 unit + 240 integration.** No mocks of the data layer and no in-memory database —
 integration tests run against a real PostgreSQL 16 container (Testcontainers).
 
 ```bash
@@ -535,13 +554,18 @@ dotnet test tests/Multitenant.UnitTests           # milliseconds, no infrastruct
 dotnet test tests/Multitenant.IntegrationTests --filter "FullyQualifiedName~TenantIsolation"
 ```
 
-**Unit tests** cover domain invariants (slug and password rules), pagination/sorting including
-offset overflow, claim generation, 2FA challenge validation and refresh-token hashing.
+**Unit tests** cover domain invariants (slug, password and feature rules), pagination/sorting,
+literal search escaping, user-name generation, design-time configuration precedence, the tenant
+write interceptor, claim/2FA-challenge generation and refresh-token hashing.
 
 **Integration tests** boot the real API via `WebApplicationFactory` and cover:
 
 - tenant isolation for projects, tasks and users, including cross-tenant writes and
   project-scoped task lists;
+- database integrity for composite foreign keys, assignee constraints and refresh-token ownership;
+- JWT live-validation negatives (claims, signature, algorithm, expiry, stamp, role, tenant and
+  email-confirmation state);
+- project/task CRUD, cascades and stale-write conflicts through PostgreSQL `xmin`;
 - cross-tenant task-assignee rejection at the database level, including the NULL-column bypass;
 - refresh rotation, reuse detection, family revocation, expiry and concurrent rotation;
 - logout-all rollback when refresh-token revocation fails (failure injection with a Postgres trigger);
@@ -556,21 +580,23 @@ offset overflow, claim generation, 2FA challenge validation and refresh-token ha
 - logout, logout-all, and lockout after repeated bad passwords;
 - registration (admin-only, cross-tenant slug rejection), duplicate emails, the role matrix;
 - email confirmation end-to-end with a captured email sender, and resend behaviour;
-- two-factor enable, login challenge, single-use recovery codes, disable and lockout;
+- two-factor setup rotation, purpose/expiry/stamp binding, enable, login challenge, single-use
+  recovery codes, disable and lockout;
 - paging, sorting, search and status/priority/date filters;
 - model-binding and FluentValidation failures sharing one `validation_failed` contract;
 - per-tenant feature switches, including the assignment block and tenant-scoped overrides;
 - tenant rename permissions and the immutable slug;
-- per-IP, per-tenant and session-maintenance rate-limiting behaviour, including
-  health-endpoint exemptions;
-- startup configuration validation (JWT key, email provider, forwarded proxies, HTTPS
-  public base URL);
-- health checks, OpenAPI (including the bearer scheme), 404/405 handling, correlation ids
-  and the problem-details shape.
+- per-IP, per-tenant and session-maintenance rate-limiting behaviour, including the
+  separate health-check budget;
+- startup configuration validation (JWT key, email provider/TLS, CORS, forwarded proxies, HTTPS
+  public base URL and nested option bounds);
+- health checks, OpenAPI (including the bearer scheme), 404/405/413/415 handling, request-size
+  limits, security headers/CORS exposure, correlation ids, query-string log redaction and the
+  problem-details shape.
 
 Docker must be running for the integration suite. The collection fixture starts one container
 per run; each test onboards tenants with unique slugs so tests never collide. The suite takes
-about 20 seconds once the image is cached.
+about 75 seconds once the image is cached.
 
 ---
 
@@ -578,9 +604,10 @@ about 20 seconds once the image is cached.
 
 ### Docker
 
-- Multi-stage `Dockerfile`, non-root `$APP_UID` user on `mcr.microsoft.com/dotnet/aspnet:11.0`,
-  plain HTTP on 8080 (terminate TLS at the ingress; the app redirects to HTTPS, so
-  `ForwardedHeaders` must carry the original scheme).
+- Multi-stage `Dockerfile`, non-root `$APP_UID` user on digest-pinned
+  `mcr.microsoft.com/dotnet/aspnet:11.0.0`, plain HTTP on 8080. Terminate TLS at the ingress and
+  configure `ForwardedHeaders` so the app sees the original scheme and client IP; without an
+  HTTPS port the built-in redirection middleware does not redirect.
 - `compose.yaml` binds **both PostgreSQL and the API** to `127.0.0.1` (loopback only) and keeps
   data in the `postgres-data` volume. The demo overlay seeds known accounts, so the loopback
   binding is part of its security boundary. The default database password is a development
@@ -590,8 +617,10 @@ about 20 seconds once the image is cached.
   because of the loopback binding; generate a real key before exposing the API through a proxy.
 - `compose.yaml` defaults `ASPNETCORE_ENVIRONMENT` to `Production`; `compose.demo.yaml` is a
   local-only overlay that enables demo seeding with a known password.
-- `.dockerignore` keeps `.env` and `appsettings.Development.json` out of the build context, so
-  local credentials are never baked into an image layer.
+- `.dockerignore` keeps `.env` and environment-specific settings out of the build context, so
+  local credentials are never baked into an image layer. The image makes `/app` read-only; the
+  Compose service also uses a read-only root filesystem, drops all capabilities, enables
+  `no-new-privileges` and mounts a persistent Data Protection key volume.
 
 ### Production checklist
 
@@ -600,7 +629,9 @@ about 20 seconds once the image is cached.
 - `AllowedHosts` set to the public host names (startup fails on `*`).
 - `ConnectionStrings__Postgres` and `Jwt__SigningKey` from the platform secret store.
 - `Auth:PublicBaseUrl` set to the public HTTPS URL used in confirmation links.
-- `Email:Provider=Smtp` (or add a provider-specific `IEmailSender`).
+- `Email:Provider=Smtp` with StartTLS (or an equivalent provider-specific `IEmailSender`).
+- `Cors:AllowedOrigins` contains only the browser origins that need access; wildcard and
+  non-loopback HTTP origins are rejected at startup.
 - Shared Data Protection key ring (Redis, Key Vault, persistent volume) when running more
   than one replica — confirmation tokens are signed with it.
 - At least two replicas behind a load balancer; note that rate-limiter state is per process
@@ -610,17 +641,20 @@ about 20 seconds once the image is cached.
 
 `.github/workflows/ci.yml`:
 
-1. **build-test** — restore (with the NuGet cache), Release build, unit tests, integration tests
-   on GitHub-hosted Ubuntu runners (Docker for Testcontainers), a container-image build so a
-   broken Dockerfile fails the PR, ReportGenerator HTML/Cobertura output plus a coverage summary
-   in the job summary, and TRX artefacts uploaded.
-2. **publish-image** — on pushes to `main`/`master` and `v*.*.*` tags, builds and pushes
+1. **build-test** — locked restore (with the NuGet cache), Release build, unit tests, integration
+   tests on GitHub-hosted Ubuntu runners (Docker for Testcontainers), required coverage reports
+   plus an HTML/Cobertura job summary, a container-image build, and a Trivy HIGH/CRITICAL scan.
+2. **security-scan** — Gitleaks scans the repository/history, and a separate guard fails if the
+   git-ignored Development settings file is ever tracked.
+3. **publish-image** — on pushes to `main`/`master` and `v*.*.*` tags, builds and pushes
    `ghcr.io/<owner>/<repo>` with branch, SHA, semver and `latest` (default branch) tags.
 
 The current release is **`v1.0.1`**, which produces container tags `1.0.1` and `1.0`. No
 repository secrets are required for tests; the image uses the workflow's default `GITHUB_TOKEN`
-permissions (`packages: write`) or a `CR_PAT`. Dependabot opens grouped weekly PRs for NuGet
-(CPM), GitHub Actions and the Docker base image.
+permissions (`packages: write`). Dependabot opens weekly PRs for GitHub Actions and Docker images.
+NuGet updates are manual until Dependabot reliably regenerates downstream lock files: bump
+`Directory.Packages.props`, run `dotnet restore multitenant-aspnet-api.slnx --force-evaluate`, and
+commit every affected `packages.lock.json`.
 
 ### Observability
 
@@ -629,15 +663,17 @@ permissions (`packages: write`) or a `CR_PAT`. Dependabot opens grouped weekly P
   included in problem details alongside ASP.NET's `traceId`.
 - **Tenant and user context** — after authentication, `TenantId` and `UserId` are pushed into
   the Serilog context, so one query can isolate a tenant's requests.
-- **Request logging** — method, path, final HTTP status and elapsed time per request. It wraps
-  exception handling, so a handled `404` is logged as `404` at Warning rather than an
-  intermediate `500` at Error; `5xx` responses log at Error.
+- **Request logging** — method, path (without the query string), final HTTP status and elapsed
+  time per request. It wraps exception handling, so a handled `404` is logged as `404` at Warning
+  rather than an intermediate `500` at Error; `5xx` responses log at Error.
+- **Browser headers** — `nosniff`, `no-referrer` and frame denial are applied globally; the
+  confirmation page gets a focused CSP.
 - **Refresh-token retention** — the hosted cleanup logs how many rows it deleted, or a warning
   when a pass fails (the next pass retries; the API stays up).
 - **Environments** — readable console in Development; compact JSON on stdout elsewhere, which
   is natively ingestible by CloudWatch Logs and Azure Log Analytics.
-- **Application Insights** — set `Serilog:AzureMonitor:ConnectionString` and events also flow
-  to App Insights (KQL-queryable in Azure Monitor).
+- **Application Insights** — outside Development, set `Serilog:AzureMonitor:ConnectionString`
+  and events also flow to App Insights (KQL-queryable in Azure Monitor).
 - **Errors** — handled exceptions log at Warning, unhandled at Error, never with a client-side
   stack trace outside Development.
 
@@ -662,6 +698,7 @@ permissions (`packages: write`) or a `CR_PAT`. Dependabot opens grouped weekly P
 | [0013](docs/adr/0013-dotnet-11-with-ef-core-10.md) | Superseded data-stack pin; OpenAPI constraint remains |
 | [0014](docs/adr/0014-dotnet-11-data-stack.md) | Complete the .NET 11 data-stack migration |
 | [0015](docs/adr/0015-refresh-token-retention.md) | Bounded refresh-token retention with a hosted cleanup job |
+| [0016](docs/adr/0016-optimistic-concurrency.md) | Optimistic concurrency for projects and tasks via PostgreSQL `xmin` |
 
 ### Toolchain: .NET 11 GA, stable packages only
 
@@ -705,6 +742,7 @@ The design is deliberately single-node and single-database today:
 ```text
 .
 ├── .github/workflows/ci.yml           build, test, build image, publish to GHCR
+├── .config/dotnet-tools.json           pinned local EF CLI
 ├── .dockerignore                      keeps local secrets out of the image
 ├── .env.example                       compose environment template
 ├── README.md                          product, API and setup guide
@@ -743,7 +781,8 @@ The design is deliberately single-node and single-database today:
 **Conventions:** one public type per file, folders describe a concern, namespaces mirror the
 folder tree, interfaces live in `Application/Abstractions` and implementations in
 `Infrastructure`. NuGet versions are managed centrally in `Directory.Packages.props` (CPM), so
-a project reference never carries a `Version` attribute. `TreatWarningsAsErrors=true` with
+a project reference never carries a `Version` attribute; committed `packages.lock.json` files
+preserve the resolved transitive graph. `TreatWarningsAsErrors=true` with
 `AnalysisLevel=latest-recommended` — the build is warning-free and
 `dotnet format --verify-no-changes` is part of the bar.
 
@@ -767,12 +806,26 @@ Deliberate scope cuts, not oversights:
   extension.
 - **No audit trail table.** Security events are logged, not persisted as domain records.
 - **Email templates are inline strings**, not a templating system.
+- **No ETags/`If-Match` yet.** Project/task writes use PostgreSQL `xmin` optimistic concurrency
+  and return `409 concurrency_conflict` on a stale write, but clients do not yet send an explicit
+  expected version ([ADR 0016](docs/adr/0016-optimistic-concurrency.md)).
+- **Email delivery is inline.** A slow SMTP server holds the request open; an outbox/background
+  worker is the next reliability improvement.
+- **2FA challenges are stamp-bound but not a one-time nonce.** With `SingleSessionPerUser=false`,
+  a challenge plus a valid code can be reused during its short lifetime.
+- **Public onboarding is per-IP/per-process limited.** Distributed limits, invite proof or CAPTCHA
+  are needed before exposing it to untrusted internet traffic.
+- **Historical development key.** An old local signing key exists in Git history and has been
+  rotated. Purging it requires a coordinated history rewrite; current CI secret scanning and
+  push-time checks prevent new leaks.
 - **MailKit 5 and Scalar 3 are not adopted yet.** Both are stable major upgrades, but SMTP
   compatibility and the OpenAPI 3 migration deserve a separate reviewed change.
 - **Tenant lifecycle is tenant-scoped by design.** Owners can rename their tenant, but there is
   no cross-tenant tenant list and no self-service deactivation: the API has no platform
   administrator, an exposed list would confirm other tenants exist, and an irreversible lockout
-  needs an operator model first ([ADR 0010](docs/adr/0010-tenant-lifecycle-scope.md)).
+  needs an operator model first ([ADR 0010](docs/adr/0010-tenant-lifecycle-scope.md)). Anonymous
+  onboarding is the one explicit exception: a duplicate slug returns `409 slug_taken` so a caller
+  can choose an available name, but no tenant data is disclosed.
 
 ---
 

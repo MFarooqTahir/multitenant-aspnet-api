@@ -1,11 +1,14 @@
 using System.Net;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Multitenant.Application.Abstractions.Tenancy;
+using Multitenant.Application.Common;
 using Multitenant.Application.Contracts.Auth;
 using Multitenant.Application.Contracts.Common;
 using Multitenant.Application.Contracts.Tenants;
 using Multitenant.Application.Contracts.Users;
 using Multitenant.IntegrationTests.Infrastructure;
+using Multitenant.Infrastructure.Identity;
 using Multitenant.Infrastructure.Persistence;
 
 namespace Multitenant.IntegrationTests;
@@ -49,22 +52,34 @@ public sealed class AuthLifecycleTests : IntegrationTestBase
         Assert.Contains("no-cache", pragma);
     }
 
-    [Theory]
-    [InlineData("missing-tenant", "owner@acme.test")]
-    [InlineData("acme", "missing@acme.test")]
-    public async Task UnknownTenantOrUserReturnsTheSameUnauthorizedResponse(string tenantSlug, string email)
+    [Fact]
+    public async Task UnknownTenantOrUserOrWrongPassword_ReturnsTheSameUnauthorizedResponse()
     {
         using var client = CreateClient();
+        var requests = new[]
+        {
+            new LoginRequest("missing-tenant", "owner@acme.test", "WrongPassword1!"),
+            new LoginRequest("acme", "missing@acme.test", "WrongPassword1!"),
+            new LoginRequest("acme", "owner@acme.test", "WrongPassword1!"),
+        };
 
-        var response = await client.PostApi(
-            "/api/v1/auth/login",
-            new LoginRequest(tenantSlug, email, "WrongPassword1!"));
+        var stableProblems = new List<(int Status, string Title, string Detail, string Code)>();
+        foreach (var request in requests)
+        {
+            var response = await client.PostApi("/api/v1/auth/login", request);
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+            Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
 
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+            var problem = await response.ReadAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
+            stableProblems.Add((
+                problem.Status ?? 0,
+                problem.Title ?? string.Empty,
+                problem.Detail ?? string.Empty,
+                problem.Extensions["code"]?.ToString() ?? string.Empty));
+        }
 
-        var problem = await response.ReadAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
-        Assert.Equal("unauthorized", problem.Extensions["code"]?.ToString());
+        Assert.Single(stableProblems.Distinct());
+        Assert.Equal((401, "Unauthorized", "Invalid credentials.", "unauthorized"), stableProblems[0]);
     }
 
     [Fact]
@@ -313,6 +328,15 @@ public sealed class AuthLifecycleTests : IntegrationTestBase
             var access = await client.GetApi("/api/v1/tenants/current", tokens.AccessToken);
             Assert.Equal(HttpStatusCode.OK, access.StatusCode);
 
+            using (var scope = Harness.Factory.Services.CreateScope())
+            {
+                var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var stored = await dbContext.RefreshTokens
+                    .SingleAsync(token => token.TokenHash == RefreshTokenManager.Hash(tokens.RefreshToken));
+                Assert.Null(stored.RevokedAtUtc);
+                Assert.Equal(1, await dbContext.RefreshTokens.CountAsync(token => token.UserId == stored.UserId));
+            }
+
             // Remove the injected failure, then prove the old refresh token was
             // not revoked by the rolled-back single-session transition.
             using (var scope = Harness.Factory.Services.CreateScope())
@@ -411,10 +435,15 @@ public sealed class AuthLifecycleTests : IntegrationTestBase
     public async Task OnboardingLocationResolvesToTheTenant()
     {
         using var client = CreateClient();
-        var tenant = await Scenarios.OnboardAsync(client, "auth-location", "Auth Location", "location@acme.test");
+        var onboard = await client.PostApi(
+            "/api/v1/tenants/onboard",
+            new OnboardTenantRequest("auth-location", "Auth Location", "location@acme.test", "Owner", Scenarios.Password));
+        Assert.Equal(HttpStatusCode.Created, onboard.StatusCode);
+        var tenant = await onboard.ReadAsync<TenantResponse>();
+        Assert.Equal($"/api/v1/tenants/{tenant.Id}", onboard.Headers.Location?.ToString());
         var tokens = await Scenarios.LoginAsync(client, "auth-location", "location@acme.test");
 
-        var response = await client.GetApi($"/api/v1/tenants/{tenant.Id}", tokens.AccessToken);
+        var response = await client.GetApi(onboard.Headers.Location!.ToString(), tokens.AccessToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Another tenant's id is not reachable, so the endpoint cannot be used to probe.
@@ -476,6 +505,10 @@ public sealed class AuthLifecycleTests : IntegrationTestBase
         using (var scope = factory.Services.CreateScope())
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var jwt = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().ReadJwtToken(tokens.AccessToken);
+            var tenantId = Guid.Parse(jwt.Claims.Single(claim => claim.Type == AuthClaims.TenantId).Value);
+            var slug = jwt.Claims.Single(claim => claim.Type == AuthClaims.TenantSlug).Value;
+            scope.ServiceProvider.GetRequiredService<ITenantContext>().SetTenant(tenantId, slug);
             var stored = await dbContext.RefreshTokens
                 .Where(x => x.UserId == user.Id && x.RevokedAtUtc == null)
                 .OrderByDescending(x => x.CreatedAtUtc)
@@ -543,5 +576,137 @@ public sealed class AuthLifecycleTests : IntegrationTestBase
             new LoginRequest("auth-lockout", "lockout@acme.test", Scenarios.Password));
 
         Assert.Equal(HttpStatusCode.Unauthorized, correct.StatusCode);
+    }
+
+    [Fact]
+    public async Task FailedRefreshUpdate_RollsBackAndLeavesOldSessionUsable()
+    {
+        using var client = CreateClient();
+        var tokens = await Scenarios.OnboardAndLoginAsync(
+            client,
+            "auth-refresh-rollback",
+            "refresh-rollback@acme.test");
+
+        using (var scope = Harness.Factory.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await dbContext.Database.ExecuteSqlRawAsync("""
+                BEGIN;
+                DROP TRIGGER IF EXISTS trg_reject_refresh_rotation_for_test ON "RefreshTokens";
+                CREATE OR REPLACE FUNCTION reject_refresh_rotation_for_test() RETURNS trigger AS $$
+                BEGIN
+                    IF NEW."RevokedReason" = 'rotated' THEN
+                        RAISE EXCEPTION 'injected refresh-token rotation failure';
+                    END IF;
+                    RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql;
+                CREATE TRIGGER trg_reject_refresh_rotation_for_test
+                BEFORE UPDATE ON "RefreshTokens"
+                FOR EACH ROW EXECUTE FUNCTION reject_refresh_rotation_for_test();
+                COMMIT;
+                """);
+        }
+
+        try
+        {
+            var failed = await client.PostApi(
+                "/api/v1/auth/refresh",
+                new RefreshTokenRequest(tokens.RefreshToken));
+            Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
+
+            using (var scope = Harness.Factory.Services.CreateScope())
+            {
+                var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var stored = await dbContext.RefreshTokens
+                    .SingleAsync(token => token.TokenHash == RefreshTokenManager.Hash(tokens.RefreshToken));
+                Assert.Null(stored.RevokedAtUtc);
+                Assert.Null(stored.ReplacedByTokenId);
+                Assert.Null(stored.RevokedReason);
+                Assert.Equal(1, await dbContext.RefreshTokens.CountAsync(token => token.UserId == stored.UserId));
+            }
+
+            var access = await client.GetApi("/api/v1/tenants/current", tokens.AccessToken);
+            Assert.Equal(HttpStatusCode.OK, access.StatusCode);
+        }
+        finally
+        {
+            using var scope = Harness.Factory.Services.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await dbContext.Database.ExecuteSqlRawAsync("""
+                DROP TRIGGER IF EXISTS trg_reject_refresh_rotation_for_test ON "RefreshTokens";
+                DROP FUNCTION IF EXISTS reject_refresh_rotation_for_test();
+                """);
+        }
+
+        var refreshed = await client.PostApi(
+            "/api/v1/auth/refresh",
+            new RefreshTokenRequest(tokens.RefreshToken));
+        Assert.Equal(HttpStatusCode.OK, refreshed.StatusCode);
+    }
+
+    [Fact]
+    public async Task LogoutAll_InvalidatesAccessAndEverySessionRefreshToken()
+    {
+        await using var factory = Harness.CreateFactory(configuration =>
+            configuration["Auth:SingleSessionPerUser"] = "false");
+        using var client = factory.CreateClient();
+        var tenant = await Scenarios.OnboardAsync(
+            client,
+            "auth-logout-all-sessions",
+            "Logout All Sessions",
+            "logout-all-sessions@acme.test");
+        var first = await Scenarios.LoginAsync(client, tenant.Slug, "logout-all-sessions@acme.test");
+        var second = await Scenarios.LoginAsync(client, tenant.Slug, "logout-all-sessions@acme.test");
+
+        var logoutAll = await client.PostApi("/api/v1/auth/logout-all", null, second.AccessToken);
+        Assert.Equal(HttpStatusCode.NoContent, logoutAll.StatusCode);
+
+        foreach (var accessToken in new[] { first.AccessToken, second.AccessToken })
+        {
+            var access = await client.GetApi("/api/v1/tenants/current", accessToken);
+            Assert.Equal(HttpStatusCode.Unauthorized, access.StatusCode);
+        }
+
+        foreach (var refreshToken in new[] { first.RefreshToken, second.RefreshToken })
+        {
+            var refresh = await client.PostApi(
+                "/api/v1/auth/refresh",
+                new RefreshTokenRequest(refreshToken));
+            Assert.Equal(HttpStatusCode.Unauthorized, refresh.StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task Registration_ReturnsLocationThatResolvesToCreatedUser()
+    {
+        using var client = CreateClient();
+        var owner = await Scenarios.OnboardAndLoginAsync(
+            client,
+            "auth-register-location",
+            "register-location-owner@acme.test");
+
+        var response = await client.PostApi(
+            "/api/v1/auth/register",
+            new RegisterRequest(
+                "auth-register-location",
+                "register-location-member@acme.test",
+                "Registration Location",
+                Scenarios.Password),
+            owner.AccessToken);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var created = await response.ReadAsync<UserResponse>();
+        Assert.Equal($"/api/v1/users/{created.Id}", response.Headers.Location?.ToString());
+
+        var follow = await client.GetApi(response.Headers.Location!.ToString(), owner.AccessToken);
+        Assert.Equal(HttpStatusCode.OK, follow.StatusCode);
+        var fetched = await follow.ReadAsync<UserResponse>();
+        Assert.Equal(created.Id, fetched.Id);
+        Assert.Equal(created.Email, fetched.Email);
+        Assert.Equal(created.DisplayName, fetched.DisplayName);
+        Assert.Equal(created.Role, fetched.Role);
+        Assert.Equal(created.IsActive, fetched.IsActive);
+        Assert.InRange(Math.Abs((created.CreatedAtUtc - fetched.CreatedAtUtc).TotalMilliseconds), 0, 1);
     }
 }

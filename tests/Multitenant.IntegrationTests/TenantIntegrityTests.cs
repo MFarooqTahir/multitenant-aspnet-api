@@ -6,6 +6,7 @@ using Multitenant.Application.Contracts.Users;
 using Multitenant.Domain.Entities;
 using Multitenant.IntegrationTests.Infrastructure;
 using Multitenant.Infrastructure.Persistence;
+using Npgsql;
 
 namespace Multitenant.IntegrationTests;
 
@@ -30,34 +31,114 @@ public sealed class TenantIntegrityTests : IntegrationTestBase
         var betaMe = await client.GetApi("/api/v1/users/me", betaTokens.AccessToken);
         var betaOwner = await betaMe.ReadAsync<UserResponse>();
 
-        // Attempt 1: the assignee's tenant does not match the task tenant.
         await AssertAssignmentRejectedAsync(
             alpha,
             alphaProject.Id,
             betaOwner.Id,
-            alpha.Id);
+            alpha.Id,
+            "23503");
 
-        // Attempt 2: the denormalized assignee tenant does not match the task tenant.
         await AssertAssignmentRejectedAsync(
             alpha,
             alphaProject.Id,
             betaOwner.Id,
-            beta.Id);
+            beta.Id,
+            "23514");
 
-        // Attempt 3: a NULL assignee tenant skipped the MATCH SIMPLE composite FK
-        // entirely, so another tenant's user id was accepted.
         await AssertAssignmentRejectedAsync(
             alpha,
             alphaProject.Id,
             betaOwner.Id,
-            assigneeTenantId: null);
+            assigneeTenantId: null,
+            "23514");
+    }
+
+    [Fact]
+    public async Task DatabaseRejectsCrossTenantProjectReference()
+    {
+        using var client = CreateClient();
+        var alpha = await Scenarios.OnboardAsync(client, "integrity-project-a", "Integrity A", "project-a@acme.test");
+        var beta = await Scenarios.OnboardAsync(client, "integrity-project-b", "Integrity B", "project-b@acme.test");
+        var alphaTokens = await Scenarios.LoginAsync(client, alpha.Slug, "project-a@acme.test");
+        var betaTokens = await Scenarios.LoginAsync(client, beta.Slug, "project-b@acme.test");
+        var betaProject = await Scenarios.CreateProjectAsync(client, betaTokens.AccessToken, "Foreign project");
+
+        using var scope = Harness.Factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<ITenantContext>().SetTenant(alpha.Id, alpha.Slug);
+        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        dbContext.WorkItems.Add(new WorkItem
+        {
+            TenantId = alpha.Id,
+            ProjectId = betaProject.Id,
+            Title = "Cross-tenant project",
+        });
+
+        var exception = await Assert.ThrowsAsync<DbUpdateException>(() => dbContext.SaveChangesAsync());
+
+        AssertSqlState(exception, "23503");
+    }
+
+    [Theory]
+    [InlineData("user-only")]
+    [InlineData("tenant-only")]
+    public async Task DatabaseRejectsHalfSetAssigneeColumns(string halfSetCase)
+    {
+        using var client = CreateClient();
+        var tenant = await Scenarios.OnboardAsync(client, $"integrity-half-{halfSetCase}", "Half Set", $"half-{halfSetCase}@acme.test");
+        var tokens = await Scenarios.LoginAsync(client, tenant.Slug, $"half-{halfSetCase}@acme.test");
+        var project = await Scenarios.CreateProjectAsync(client, tokens.AccessToken, "Half-set project");
+        var me = await (await client.GetApi("/api/v1/users/me", tokens.AccessToken)).ReadAsync<UserResponse>();
+
+        using var scope = Harness.Factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<ITenantContext>().SetTenant(tenant.Id, tenant.Slug);
+        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        dbContext.WorkItems.Add(new WorkItem
+        {
+            TenantId = tenant.Id,
+            ProjectId = project.Id,
+            Title = "Half-set assignee",
+            AssigneeUserId = halfSetCase == "user-only" ? me.Id : null,
+            AssigneeTenantId = halfSetCase == "tenant-only" ? tenant.Id : null,
+        });
+
+        var exception = await Assert.ThrowsAsync<DbUpdateException>(() => dbContext.SaveChangesAsync());
+
+        AssertSqlState(exception, "23514");
+    }
+
+    [Fact]
+    public async Task DatabaseRejectsRefreshTokenForUserFromAnotherTenant()
+    {
+        using var client = CreateClient();
+        var alpha = await Scenarios.OnboardAsync(client, "integrity-refresh-a", "Integrity A", "refresh-a@acme.test");
+        var beta = await Scenarios.OnboardAsync(client, "integrity-refresh-b", "Integrity B", "refresh-b@acme.test");
+        var betaTokens = await Scenarios.LoginAsync(client, beta.Slug, "refresh-b@acme.test");
+        var betaUser = await (await client.GetApi("/api/v1/users/me", betaTokens.AccessToken)).ReadAsync<UserResponse>();
+
+        using var scope = Harness.Factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<ITenantContext>().SetTenant(alpha.Id, alpha.Slug);
+        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        dbContext.RefreshTokens.Add(new RefreshToken
+        {
+            TenantId = alpha.Id,
+            UserId = betaUser.Id,
+            TokenHash = new string('a', 64),
+            FamilyId = Guid.NewGuid(),
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+            ExpiresAtUtc = DateTimeOffset.UtcNow.AddDays(30),
+        });
+
+        var exception = await Assert.ThrowsAsync<DbUpdateException>(() => dbContext.SaveChangesAsync());
+
+        AssertSqlState(exception, "23503");
     }
 
     private async Task AssertAssignmentRejectedAsync(
         TenantResponse tenant,
         Guid projectId,
         Guid assigneeUserId,
-        Guid? assigneeTenantId)
+        Guid? assigneeTenantId,
+        string expectedSqlState)
     {
         using var scope = Harness.Factory.Services.CreateScope();
         var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();
@@ -73,6 +154,13 @@ public sealed class TenantIntegrityTests : IntegrationTestBase
             AssigneeTenantId = assigneeTenantId,
         });
 
-        await Assert.ThrowsAsync<DbUpdateException>(() => dbContext.SaveChangesAsync());
+        var exception = await Assert.ThrowsAsync<DbUpdateException>(() => dbContext.SaveChangesAsync());
+        AssertSqlState(exception, expectedSqlState);
+    }
+
+    private static void AssertSqlState(DbUpdateException exception, string expectedSqlState)
+    {
+        var postgresException = Assert.IsType<PostgresException>(exception.InnerException);
+        Assert.Equal(expectedSqlState, postgresException.SqlState);
     }
 }

@@ -7,8 +7,12 @@ public sealed class CreateProjectRequestValidator : AbstractValidator<CreateProj
 {
     public CreateProjectRequestValidator()
     {
-        RuleFor(x => x.Name).NotEmpty().Length(2, 120);
-        RuleFor(x => x.Description).MaximumLength(2000);
+        RuleFor(x => x.Name)
+            .Must(name => name?.Trim().Length is >= 2 and <= 120)
+            .WithMessage("Name must be between 2 and 120 characters after trimming.");
+        RuleFor(x => x.Description)
+            .Must(description => description is null || description.Trim().Length <= 2000)
+            .WithMessage("Description cannot exceed 2000 characters after trimming.");
         RuleFor(x => x.Status).IsInEnum();
     }
 }

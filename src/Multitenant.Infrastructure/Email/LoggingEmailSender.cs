@@ -13,7 +13,7 @@ public sealed partial class LoggingEmailSender(ILogger<LoggingEmailSender> logge
     public Task SendAsync(EmailMessage message, CancellationToken cancellationToken)
     {
         var safeBody = TokenPattern().Replace(message.TextBody ?? string.Empty, "$1token=[REDACTED]");
-        LogEmail(logger, message.ToAddress, message.Subject, safeBody);
+        LogEmail(logger, message.Subject, safeBody);
         return Task.CompletedTask;
     }
 
@@ -25,6 +25,6 @@ public sealed partial class LoggingEmailSender(ILogger<LoggingEmailSender> logge
     [LoggerMessage(
         EventId = 1001,
         Level = LogLevel.Information,
-        Message = "Email to {ToAddress} with subject {Subject}. Body: {TextBody}")]
-    private static partial void LogEmail(ILogger logger, string toAddress, string subject, string textBody);
+        Message = "Email with subject {Subject}. Body: {TextBody}")]
+    private static partial void LogEmail(ILogger logger, string subject, string textBody);
 }

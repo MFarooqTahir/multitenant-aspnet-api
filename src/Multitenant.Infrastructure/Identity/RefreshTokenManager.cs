@@ -1,3 +1,6 @@
+using System.Buffers.Text;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Multitenant.Application.Configuration.Auth;
@@ -14,8 +17,8 @@ public sealed class RefreshTokenManager(
 
     public static string Hash(string token)
     {
-        var bytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(token));
-        return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(token));
+        return Base64Url.EncodeToString(bytes);
     }
 
     public (string RawToken, RefreshToken Entity) Create(
@@ -42,44 +45,44 @@ public sealed class RefreshTokenManager(
         return (raw, entity);
     }
 
-
-
-    public async Task RevokeFamilyAsync(Guid familyId, string reason, CancellationToken cancellationToken)
+    public Task<int> RevokeFamilyAsync(
+        Guid tenantId,
+        Guid familyId,
+        string reason,
+        CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
-        var tokens = await dbContext.RefreshTokens
-            .Where(x => x.FamilyId == familyId && x.RevokedAtUtc == null)
-            .ToListAsync(cancellationToken);
 
-        foreach (var token in tokens)
-        {
-            token.RevokedAtUtc = now;
-            token.RevokedReason = reason;
-        }
-
-        await dbContext.SaveChangesAsync(cancellationToken);
+        return dbContext.RefreshTokens
+            .Where(x => x.TenantId == tenantId && x.FamilyId == familyId && x.RevokedAtUtc == null)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(x => x.RevokedAtUtc, now)
+                    .SetProperty(x => x.RevokedReason, reason),
+                cancellationToken);
     }
 
-    public async Task RevokeAllForUserAsync(Guid userId, string reason, CancellationToken cancellationToken)
+    public Task<int> RevokeAllForUserAsync(
+        Guid tenantId,
+        Guid userId,
+        string reason,
+        CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
-        var tokens = await dbContext.RefreshTokens
-            .Where(x => x.UserId == userId && x.RevokedAtUtc == null)
-            .ToListAsync(cancellationToken);
 
-        foreach (var token in tokens)
-        {
-            token.RevokedAtUtc = now;
-            token.RevokedReason = reason;
-        }
-
-        await dbContext.SaveChangesAsync(cancellationToken);
+        return dbContext.RefreshTokens
+            .Where(x => x.TenantId == tenantId && x.UserId == userId && x.RevokedAtUtc == null)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(x => x.RevokedAtUtc, now)
+                    .SetProperty(x => x.RevokedReason, reason),
+                cancellationToken);
     }
 
     public static string CreateRawToken()
     {
         var bytes = new byte[32];
-        System.Security.Cryptography.RandomNumberGenerator.Fill(bytes);
-        return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        RandomNumberGenerator.Fill(bytes);
+        return Base64Url.EncodeToString(bytes);
     }
 }

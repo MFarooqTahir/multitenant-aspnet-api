@@ -16,7 +16,9 @@ namespace Multitenant.Infrastructure.Services;
 /// </summary>
 public sealed partial class TenantService(
     AppDbContext dbContext,
+    TenantRowLock tenantRowLock,
     ITenantContext tenantContext,
+    ICurrentUser currentUser,
     IUserProvisioningService userProvisioning,
     IAccountEmailService accountEmailService,
     TimeProvider timeProvider,
@@ -91,12 +93,40 @@ public sealed partial class TenantService(
     {
         var tenantId = tenantContext.TenantId ?? throw new UnauthorizedException();
 
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await tenantRowLock.AcquireAsync(cancellationToken);
+
+        // The Owner policy ran before this request reached the service. Re-read
+        // the role under the same lock used by user administration so a concurrent
+        // demotion cannot leave an ex-Owner able to rename the tenant.
+        var actor = await dbContext.Users
+            .FirstOrDefaultAsync(x => x.Id == currentUser.UserId, cancellationToken)
+            ?? throw new UnauthorizedException();
+
+        if (!actor.IsActive)
+        {
+            throw new UnauthorizedException();
+        }
+
+        var actorRole = await (
+                from userRole in dbContext.UserRoles
+                join role in dbContext.Roles on userRole.RoleId equals role.Id
+                where userRole.UserId == actor.Id
+                select role.Name)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (!string.Equals(actorRole, TenantRoles.Owner, StringComparison.Ordinal))
+        {
+            throw new ForbiddenException("Only an Owner can rename the tenant.", "role_not_allowed");
+        }
+
         var tenant = await dbContext.Tenants
             .FirstOrDefaultAsync(x => x.Id == tenantId, cancellationToken)
             ?? throw new NotFoundException("Tenant not found.");
 
         tenant.Rename(request.Name);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
         return ToResponse(tenant);
     }

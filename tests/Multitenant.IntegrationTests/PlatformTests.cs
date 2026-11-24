@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.Options;
 using Multitenant.Api.Configuration;
 using Multitenant.Application.Contracts.Auth;
 using Multitenant.Application.Contracts.Projects;
@@ -106,7 +107,8 @@ public sealed class PlatformTests : IntegrationTestBase
         using var factory = Harness.CreateFactory(configuration =>
             configuration["Auth:PublicBaseUrl"] = "http://api.example.com");
 
-        Assert.ThrowsAny<Exception>(factory.CreateClient);
+        var exception = Assert.Throws<OptionsValidationException>(() => factory.CreateClient());
+        Assert.Contains("Auth:PublicBaseUrl", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -194,7 +196,8 @@ public sealed class PlatformTests : IntegrationTestBase
         using var factory = Harness.CreateFactory(configuration =>
             configuration["Email:Provider"] = "CarrierPigeon");
 
-        Assert.ThrowsAny<Exception>(factory.CreateClient);
+        var exception = Assert.Throws<OptionsValidationException>(() => factory.CreateClient());
+        Assert.Contains("Email:Provider", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -203,7 +206,8 @@ public sealed class PlatformTests : IntegrationTestBase
         using var factory = Harness.CreateFactory(configuration =>
             configuration["Jwt:SigningKey"] = "too-short");
 
-        Assert.ThrowsAny<Exception>(factory.CreateClient);
+        var exception = Assert.Throws<OptionsValidationException>(() => factory.CreateClient());
+        Assert.Contains("SigningKey", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

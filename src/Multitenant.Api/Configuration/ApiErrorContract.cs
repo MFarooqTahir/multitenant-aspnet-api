@@ -35,6 +35,14 @@ public static class ApiErrorContract
                 context.ProblemDetails.Extensions.TryAdd(
                     "correlationId",
                     httpContext.Items[CorrelationKeys.ItemKey]);
+
+                var statusCode = context.ProblemDetails.Status ?? httpContext.Response.StatusCode;
+                var code = ApiProblemDetails.CodeForStatus(statusCode);
+                if (code is not null)
+                {
+                    context.ProblemDetails.Type = ApiProblemDetails.TypeFor(statusCode);
+                    context.ProblemDetails.Extensions.TryAdd("code", code);
+                }
             };
         });
 

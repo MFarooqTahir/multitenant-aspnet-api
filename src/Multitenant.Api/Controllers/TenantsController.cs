@@ -17,11 +17,12 @@ public sealed class TenantsController(
     ITenantFeatureService tenantFeatureService) : ControllerBase
 {
     /// <summary>
-    /// Provisions a new tenant (roles, owner account and starter data) in one transaction.
+    /// Provisions a new tenant (tenant row, owner account and starter data) in one transaction.
     /// Anonymous by design: this is the self-service sign-up entry point.
     /// </summary>
     [HttpPost("onboard")]
     [AllowAnonymous]
+    [RequestSizeLimit(16_384)]
     [EnableRateLimiting(RateLimitingSetup.AuthPolicy)]
     [ProducesResponseType<TenantResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -79,7 +80,7 @@ public sealed class TenantsController(
         string key,
         UpdateTenantFeatureRequest request,
         CancellationToken cancellationToken) =>
-        Ok(await tenantFeatureService.SetAsync(key, request.IsEnabled, cancellationToken));
+        Ok(await tenantFeatureService.SetAsync(key, request.IsEnabled!.Value, cancellationToken));
 
     /// <summary>
     /// Returns a tenant by id. Only the caller's own tenant is reachable, so the

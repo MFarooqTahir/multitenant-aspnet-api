@@ -22,7 +22,9 @@ Two of those are tempting to add and wrong for this design:
 
 ## Decision
 
-1. Add `PUT /tenants/current` so an Owner can rename the current tenant.
+1. Add `PUT /tenants/current` so an Owner can rename the current tenant. The service re-checks
+   the Owner role under the tenant row lock before writing, so a concurrent demotion cannot
+   authorize a stale request.
 2. Keep the slug immutable: it is the login key, and changing it would silently break every
    user's sign-in and every stored confirmation link.
 3. Do **not** add a cross-tenant tenant list.
@@ -35,6 +37,9 @@ Two of those are tempting to add and wrong for this design:
 - Tenant administration stays inside the isolation model: a caller can only act on the tenant
   the token resolves to.
 - `GET /tenants/{id}` keeps returning the caller's tenant only; other ids remain `404`.
+- Anonymous onboarding is the one explicit existence oracle: a duplicate slug returns
+  `409 slug_taken` so a caller can choose an available name. It reveals no tenant data, and the
+  README calls out this exception.
 - If a platform-administrator role is introduced later, a tenant list and a reversible
   deactivate/reactivate pair become reasonable additions; the current contracts do not block it.
 - The README's limitations section states this scope explicitly so reviewers do not read the

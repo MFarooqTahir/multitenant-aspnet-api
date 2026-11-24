@@ -1,6 +1,8 @@
 using Multitenant.Application.Contracts.Auth;
 using Multitenant.Application.Contracts.Projects;
 using Multitenant.Application.Contracts.Tenants;
+using Multitenant.Application.Contracts.Users;
+using Multitenant.Domain.Entities;
 
 namespace Multitenant.IntegrationTests.Infrastructure;
 
@@ -56,10 +58,26 @@ public static class Scenarios
     {
         var response = await client.PostApi(
             "/api/v1/projects",
-            new CreateProjectRequest(name, null, Domain.Entities.ProjectStatus.Active),
+            new CreateProjectRequest(name, null, ProjectStatus.Active),
             accessToken);
 
         Assert.Equal(System.Net.HttpStatusCode.Created, response.StatusCode);
         return await response.ReadAsync<ProjectResponse>();
+    }
+
+    public static async Task<UserResponse> CreateUserAsync(
+        HttpClient client,
+        string accessToken,
+        string email,
+        string role = TenantRoles.Member,
+        string displayName = "Scenario User")
+    {
+        var response = await client.PostApi(
+            "/api/v1/users",
+            new CreateUserRequest(email, displayName, Password, role),
+            accessToken);
+
+        Assert.Equal(System.Net.HttpStatusCode.Created, response.StatusCode);
+        return await response.ReadAsync<UserResponse>();
     }
 }

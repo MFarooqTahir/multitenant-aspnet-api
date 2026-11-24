@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Multitenant.Application.Abstractions.Identity;
 using Multitenant.Application.Abstractions.Tenancy;
 using Multitenant.Application.Common.Paging;
+using Multitenant.Application.Common.Search;
 using Multitenant.Application.Contracts.Common;
 using Multitenant.Application.Contracts.Users;
 using Multitenant.Application.Errors.Exceptions;
@@ -17,6 +18,7 @@ namespace Multitenant.Infrastructure.Services;
 /// </summary>
 public sealed class UserService(
     AppDbContext dbContext,
+    TenantRowLock tenantRowLock,
     UserManager<AppUser> userManager,
     ICurrentUser currentUser,
     ITenantContext tenantContext,
@@ -39,10 +41,10 @@ public sealed class UserService(
 
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
-            var search = $"%{query.Search.Trim()}%";
+            var search = SearchPattern.Contains(query.Search);
             users = users.Where(x =>
-                EF.Functions.ILike(x.Email ?? string.Empty, search)
-                || EF.Functions.ILike(x.DisplayName, search));
+                EF.Functions.ILike(x.Email ?? string.Empty, search, SearchPattern.EscapeCharacter)
+                || EF.Functions.ILike(x.DisplayName, search, SearchPattern.EscapeCharacter));
         }
 
         if (query.IsActive is not null)
@@ -72,37 +74,55 @@ public sealed class UserService(
 
         users = field switch
         {
-            "email" => descending ? users.OrderByDescending(x => x.Email) : users.OrderBy(x => x.Email),
+            "email" => descending
+                ? users.OrderByDescending(x => x.Email).ThenByDescending(x => x.Id)
+                : users.OrderBy(x => x.Email).ThenBy(x => x.Id),
             "displayname" => descending
-                ? users.OrderByDescending(x => x.DisplayName)
-                : users.OrderBy(x => x.DisplayName),
+                ? users.OrderByDescending(x => x.DisplayName).ThenByDescending(x => x.Id)
+                : users.OrderBy(x => x.DisplayName).ThenBy(x => x.Id),
             _ => descending
-                ? users.OrderByDescending(x => x.CreatedAtUtc)
-                : users.OrderBy(x => x.CreatedAtUtc),
+                ? users.OrderByDescending(x => x.CreatedAtUtc).ThenByDescending(x => x.Id)
+                : users.OrderBy(x => x.CreatedAtUtc).ThenBy(x => x.Id),
         };
 
         var items = await users
             .Skip(Pagination.Skip(page, pageSize))
             .Take(pageSize)
+            .Select(x => new UserResponse(
+                x.Id,
+                x.Email ?? string.Empty,
+                x.DisplayName,
+                (
+                    from userRole in dbContext.UserRoles
+                    join role in dbContext.Roles on userRole.RoleId equals role.Id
+                    where userRole.UserId == x.Id
+                    select role.Name
+                ).FirstOrDefault() ?? TenantRoles.Member,
+                x.IsActive,
+                x.CreatedAtUtc))
             .ToListAsync(cancellationToken);
 
-        var roles = await RolesForAsync([.. items.Select(x => x.Id)], cancellationToken);
-
-        var responses = items
-            .Select(x => userProvisioning.ToResponse(x, roles.GetValueOrDefault(x.Id, TenantRoles.Member)))
-            .ToList();
-
-        return new PagedResult<UserResponse>(responses, page, pageSize, totalCount);
+        return new PagedResult<UserResponse>(items, page, pageSize, totalCount);
     }
 
     public async Task<UserResponse> GetAsync(Guid id, CancellationToken cancellationToken)
     {
-        var user = await dbContext.Users
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken)
+        return await dbContext.Users
+            .Where(x => x.Id == id)
+            .Select(x => new UserResponse(
+                x.Id,
+                x.Email ?? string.Empty,
+                x.DisplayName,
+                (
+                    from userRole in dbContext.UserRoles
+                    join role in dbContext.Roles on userRole.RoleId equals role.Id
+                    where userRole.UserId == x.Id
+                    select role.Name
+                ).FirstOrDefault() ?? TenantRoles.Member,
+                x.IsActive,
+                x.CreatedAtUtc))
+            .FirstOrDefaultAsync(cancellationToken)
             ?? throw new NotFoundException("User not found.");
-
-        return userProvisioning.ToResponse(user, await GetRoleAsync(user));
     }
 
     public async Task<UserResponse> CreateAsync(
@@ -110,8 +130,14 @@ public sealed class UserService(
         CancellationToken cancellationToken)
     {
         var requestedRole = TenantRoles.Normalize(request.Role);
-        var actorRole = TenantRoles.Normalize(currentUser.Role);
         var tenantId = tenantContext.TenantId ?? throw new UnauthorizedException();
+        var tenantSlug = tenantContext.Slug ?? throw new UnauthorizedException();
+
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await tenantRowLock.AcquireAsync(cancellationToken);
+
+        var actor = await GetActorAsync(cancellationToken);
+        var actorRole = TenantRoles.Normalize(await GetRoleAsync(actor));
 
         if (actorRole == TenantRoles.Member)
         {
@@ -125,13 +151,17 @@ public sealed class UserService(
 
         var user = await userProvisioning.CreateAsync(
             tenantId,
-            tenantContext.Slug ?? string.Empty,
+            tenantSlug,
             request.Email,
             request.DisplayName,
             request.Password,
             requestedRole,
             cancellationToken);
 
+        await transaction.CommitAsync(cancellationToken);
+
+        // Delivery is a side effect and must not hold the tenant lock or roll back
+        // an already-committed user.
         await accountEmailService.SendConfirmationEmailAsync(user, cancellationToken);
 
         return userProvisioning.ToResponse(user, requestedRole);
@@ -142,6 +172,21 @@ public sealed class UserService(
         string role,
         CancellationToken cancellationToken)
     {
+        var requestedRole = TenantRoles.Normalize(role);
+
+        // Lock first, then re-read actor and target roles. Otherwise an Admin can
+        // act on a stale Member role while an Owner promotes that user concurrently.
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await tenantRowLock.AcquireAsync(cancellationToken);
+
+        var actor = await GetActorAsync(cancellationToken);
+        var actorRole = TenantRoles.Normalize(await GetRoleAsync(actor));
+
+        if (actorRole == TenantRoles.Member)
+        {
+            throw new ForbiddenException("Members cannot change roles.", "role_not_allowed");
+        }
+
         var target = await dbContext.Users.FirstOrDefaultAsync(x => x.Id == id, cancellationToken)
             ?? throw new NotFoundException("User not found.");
 
@@ -150,15 +195,8 @@ public sealed class UserService(
             throw new ForbiddenException("You cannot change your own role.", "self_role_change");
         }
 
-        var actorRole = TenantRoles.Normalize(currentUser.Role);
-        var requestedRole = TenantRoles.Normalize(role);
         var targetRoles = await userManager.GetRolesAsync(target);
         var currentRole = targetRoles.FirstOrDefault() ?? TenantRoles.Member;
-
-        if (actorRole == TenantRoles.Member)
-        {
-            throw new ForbiddenException("Members cannot change roles.", "role_not_allowed");
-        }
 
         if ((currentRole == TenantRoles.Owner || requestedRole == TenantRoles.Owner)
             && actorRole != TenantRoles.Owner)
@@ -170,12 +208,6 @@ public sealed class UserService(
         {
             return userProvisioning.ToResponse(target, requestedRole);
         }
-
-        // Both role writes must succeed together; otherwise the user would be left
-        // with no role at all. The tenant row lock serializes concurrent Owner
-        // changes so the last-Owner guard cannot be defeated by a race.
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
-        await LockTenantAsync(cancellationToken);
 
         if (currentRole == TenantRoles.Owner && await CountOwnersAsync(cancellationToken) <= 1)
         {
@@ -201,6 +233,17 @@ public sealed class UserService(
 
     public async Task DeleteAsync(Guid id, CancellationToken cancellationToken)
     {
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await tenantRowLock.AcquireAsync(cancellationToken);
+
+        var actor = await GetActorAsync(cancellationToken);
+        var actorRole = TenantRoles.Normalize(await GetRoleAsync(actor));
+
+        if (actorRole == TenantRoles.Member)
+        {
+            throw new ForbiddenException("Members cannot delete users.", "role_not_allowed");
+        }
+
         var target = await dbContext.Users.FirstOrDefaultAsync(x => x.Id == id, cancellationToken)
             ?? throw new NotFoundException("User not found.");
 
@@ -209,24 +252,13 @@ public sealed class UserService(
             throw new ForbiddenException("You cannot delete your own account.", "self_delete");
         }
 
-        var actorRole = TenantRoles.Normalize(currentUser.Role);
         var targetRoles = await userManager.GetRolesAsync(target);
         var targetRole = targetRoles.FirstOrDefault() ?? TenantRoles.Member;
-
-        if (actorRole == TenantRoles.Member)
-        {
-            throw new ForbiddenException("Members cannot delete users.", "role_not_allowed");
-        }
 
         if (targetRole == TenantRoles.Owner && actorRole != TenantRoles.Owner)
         {
             throw new ForbiddenException("Only an Owner can delete an Owner.", "role_not_allowed");
         }
-
-        // Same guard and the same serialization as UpdateRoleAsync: deleting and
-        // demoting are two ways of removing the last Owner.
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
-        await LockTenantAsync(cancellationToken);
 
         if (targetRole == TenantRoles.Owner && await CountOwnersAsync(cancellationToken) <= 1)
         {
@@ -237,45 +269,24 @@ public sealed class UserService(
         await transaction.CommitAsync(cancellationToken);
     }
 
-    private async Task<Dictionary<Guid, string>> RolesForAsync(
-        List<Guid> userIds,
-        CancellationToken cancellationToken)
+    private async Task<AppUser> GetActorAsync(CancellationToken cancellationToken)
     {
-        if (userIds.Count == 0)
+        var actor = await dbContext.Users
+            .FirstOrDefaultAsync(x => x.Id == currentUser.UserId, cancellationToken)
+            ?? throw new UnauthorizedException();
+
+        if (!actor.IsActive)
         {
-            return [];
+            throw new UnauthorizedException();
         }
 
-        var rows = await (
-                from userRole in dbContext.UserRoles
-                join role in dbContext.Roles on userRole.RoleId equals role.Id
-                where userIds.Contains(userRole.UserId)
-                select new { userRole.UserId, Role = role.Name ?? TenantRoles.Member })
-            .ToListAsync(cancellationToken);
-
-        return rows
-            .GroupBy(x => x.UserId)
-            .ToDictionary(x => x.Key, x => x.First().Role);
+        return actor;
     }
 
     private async Task<string> GetRoleAsync(AppUser user)
     {
         var roles = await userManager.GetRolesAsync(user);
         return roles.FirstOrDefault() ?? TenantRoles.Member;
-    }
-
-    /// <summary>
-    /// Takes a row lock on the current tenant, held until the surrounding
-    /// transaction ends. Two concurrent Owner demotions would otherwise both read
-    /// "two Owners" and both commit, leaving the tenant without one.
-    /// </summary>
-    private async Task LockTenantAsync(CancellationToken cancellationToken)
-    {
-        var tenantId = tenantContext.TenantId ?? throw new UnauthorizedException();
-
-        await dbContext.Database.ExecuteSqlAsync(
-            $"SELECT 1 FROM \"Tenants\" WHERE \"Id\" = {tenantId} FOR UPDATE",
-            cancellationToken);
     }
 
     private Task<int> CountOwnersAsync(CancellationToken cancellationToken)

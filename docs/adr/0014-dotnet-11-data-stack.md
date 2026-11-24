@@ -22,8 +22,9 @@ Move the whole data stack to 11.0.0 through the existing CPM properties:
 - Keep `Microsoft.AspNetCore.OpenApi` 10.0.13 and `Asp.Versioning.OpenApi` 10.2.3: the latter
   still requires `Microsoft.OpenApi < 3.0.0`, while ASP.NET Core OpenAPI 11 requires 3.11+.
 
-No schema change was required; the existing migrations are applied by EF Core 11 in the
-Testcontainers suite.
+The data-stack version bump itself required no schema change; the existing migrations are applied
+by EF Core 11 in the Testcontainers suite. The later `RefreshTokenIntegrityAndRetention` migration
+is an independent integrity improvement, not a requirement of the provider upgrade.
 
 ## Consequences
 

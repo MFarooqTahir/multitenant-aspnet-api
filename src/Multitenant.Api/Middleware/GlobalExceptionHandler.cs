@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.EntityFrameworkCore;
 using Multitenant.Api.ErrorHandling;
 using Multitenant.Application.Errors;
 using Multitenant.Domain.Entities;
@@ -49,10 +50,20 @@ public sealed partial class GlobalExceptionHandler(
                 "Bad Request",
                 "domain_error",
                 domain.Message),
-            BadHttpRequestException => (
-                StatusCodes.Status400BadRequest,
-                "Bad Request",
-                "invalid_request",
+            DbUpdateConcurrencyException => (
+                StatusCodes.Status409Conflict,
+                "Conflict",
+                "concurrency_conflict",
+                "The resource was changed by another request. Reload it and try again."),
+            BadHttpRequestException badRequest => (
+                badRequest.StatusCode,
+                TitleFor(badRequest.StatusCode),
+                badRequest.StatusCode switch
+                {
+                    StatusCodes.Status413PayloadTooLarge => "payload_too_large",
+                    StatusCodes.Status415UnsupportedMediaType => "unsupported_media_type",
+                    _ => "invalid_request",
+                },
                 "The request could not be parsed."),
             OperationCanceledException => (
                 StatusCodes.Status499ClientClosedRequest,
@@ -74,8 +85,12 @@ public sealed partial class GlobalExceptionHandler(
         StatusCodes.Status401Unauthorized => "Unauthorized",
         StatusCodes.Status403Forbidden => "Forbidden",
         StatusCodes.Status404NotFound => "Not Found",
+        StatusCodes.Status405MethodNotAllowed => "Method Not Allowed",
         StatusCodes.Status409Conflict => "Conflict",
+        StatusCodes.Status413PayloadTooLarge => "Payload Too Large",
+        StatusCodes.Status415UnsupportedMediaType => "Unsupported Media Type",
         StatusCodes.Status429TooManyRequests => "Too Many Requests",
+        StatusCodes.Status499ClientClosedRequest => "Client Closed Request",
         _ => "Internal Server Error",
     };
 

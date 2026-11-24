@@ -24,6 +24,8 @@ Require the `manage_tenant` policy (Owner or Admin) on `POST /auth/register`:
   create users inside another.
 - The created account is always `Member`; promotion happens through `PATCH /users/{id}/role`.
 - The endpoint now sends the confirmation email, matching `/users` and onboarding.
+- The service takes the tenant row lock and re-reads the caller's live role before creating the
+  account, so a concurrent demotion cannot authorize a stale Admin request.
 - Anonymous joining is removed rather than made opt-in. Public sign-up, when a product needs
   it, should be a signed invite or an email-domain allow-list — something that proves the
   tenant consented — not a flag that turns the old hole back on.

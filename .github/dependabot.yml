@@ -1,35 +1,23 @@
 version: 2
 
-# Keeps Central Package Management, the GitHub Actions pins and the Docker base
-# image current. Grouped so a weekly run opens a handful of reviewable PRs
-# instead of one per package.
+# Keeps GitHub Actions pins and Docker images current. NuGet updates are manual
+# because Dependabot does not reliably regenerate downstream packages.lock.json
+# files for ProjectReference graphs; AGENTS.md documents the required regeneration.
 updates:
-  - package-ecosystem: "nuget"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    groups:
-      microsoft:
-        patterns:
-          - "Microsoft.*"
-          - "System.*"
-      test-stack:
-        patterns:
-          - "xunit*"
-          - "coverlet*"
-          - "Testcontainers*"
-          - "Respawn"
-      serilog:
-        patterns:
-          - "Serilog*"
-
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
 
+  # Dependabot does not reliably regenerate downstream packages.lock.json files
+  # for ProjectReference graphs. NuGet updates are therefore manual until that
+  # support lands; AGENTS.md documents the required locked restore regeneration.
   - package-ecosystem: "docker"
     directory: "/src/Multitenant.Api"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker-compose"
+    directory: "/"
     schedule:
       interval: "weekly"

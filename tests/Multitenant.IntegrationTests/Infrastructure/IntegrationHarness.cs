@@ -41,7 +41,8 @@ public sealed class IntegrationHarness : IDisposable, IAsyncLifetime
 
     public WebApplicationFactory<IApiMarker> CreateFactory(
         Action<Dictionary<string, string?>>? overrideConfiguration = null,
-        Action<IServiceCollection>? configureServices = null)
+        Action<IServiceCollection>? configureServices = null,
+        string environment = "Testing")
     {
         var configuration = new Dictionary<string, string?>(CreateDefaultConfiguration())
         {
@@ -50,7 +51,7 @@ public sealed class IntegrationHarness : IDisposable, IAsyncLifetime
 
         overrideConfiguration?.Invoke(configuration);
 
-        return new IntegrationWebApplicationFactory(configuration, configureServices);
+        return new IntegrationWebApplicationFactory(configuration, configureServices, environment);
     }
 
     private static Dictionary<string, string?> CreateDefaultConfiguration() => new()
@@ -61,6 +62,7 @@ public sealed class IntegrationHarness : IDisposable, IAsyncLifetime
         ["Jwt:SigningKey"] = "integration-test-signing-key-0123456789abcdef0123456789",
         ["Jwt:Issuer"] = "multitenant-aspnet-api",
         ["Jwt:Audience"] = "multitenant-aspnet-api",
+        ["AllowedHosts"] = "localhost",
         ["Auth:RefreshTokenDays"] = "30",
         ["Auth:RefreshTokenCleanup:Enabled"] = "false",
         ["RateLimiting:Tenant:PermitLimit"] = "1000",
@@ -70,14 +72,24 @@ public sealed class IntegrationHarness : IDisposable, IAsyncLifetime
 
     private sealed class IntegrationWebApplicationFactory(
         Dictionary<string, string?> configuration,
-        Action<IServiceCollection>? configureServices) : WebApplicationFactory<IApiMarker>
+        Action<IServiceCollection>? configureServices,
+        string environment) : WebApplicationFactory<IApiMarker>
     {
         private readonly Dictionary<string, string?> _configuration = configuration;
         private readonly Action<IServiceCollection>? _configureServices = configureServices;
+        private readonly string _environment = environment;
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            builder.UseEnvironment("Testing");
+            builder.UseEnvironment(_environment);
+            foreach (var (key, value) in _configuration)
+            {
+                if (value is not null)
+                {
+                    builder.UseSetting(key, value);
+                }
+            }
+
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(_configuration));
 
             if (_configureServices is not null)

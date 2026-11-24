@@ -17,6 +17,11 @@ public sealed class TenantContext : ITenantContext
             throw new ArgumentException("Tenant id cannot be empty.", nameof(tenantId));
         }
 
+        if (string.IsNullOrWhiteSpace(slug))
+        {
+            throw new ArgumentException("Tenant slug cannot be empty.", nameof(slug));
+        }
+
         TenantId = tenantId;
         Slug = slug;
     }

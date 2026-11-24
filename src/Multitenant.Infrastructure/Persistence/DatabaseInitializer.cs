@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Multitenant.Application.Abstractions.Tenancy;
+using Multitenant.Application.Common.Security;
 using Multitenant.Application.Configuration.Database;
 using Multitenant.Domain.Entities;
 
@@ -47,6 +48,12 @@ public sealed partial class DatabaseInitializer(
         {
             throw new InvalidOperationException(
                 "Database:SeedDemoData is enabled but Demo:Password is empty. Set Demo:Password or disable demo seeding.");
+        }
+
+        if (!PasswordRules.IsValid(_demo.Password))
+        {
+            throw new InvalidOperationException(
+                $"Database:SeedDemoData is enabled but Demo:Password does not satisfy the password policy. {PasswordRules.Description}");
         }
 
         await SeedDemoTenantAsync(

@@ -9,6 +9,8 @@ public static partial class PasswordRules
 {
     public const int MinimumLength = 12;
 
+    public const int MaximumLength = 128;
+
     public const bool RequireUppercase = true;
 
     public const bool RequireLowercase = true;
@@ -18,11 +20,12 @@ public static partial class PasswordRules
     public const bool RequireNonAlphanumeric = true;
 
     public const string Description =
-        "Password must be at least 12 characters and contain an uppercase letter, a lowercase letter, a digit and a symbol.";
+        "Password must be 12-128 characters and contain an uppercase letter, a lowercase letter, a digit and a symbol.";
 
     public static bool IsValid(string? password) =>
         !string.IsNullOrEmpty(password)
         && password.Length >= MinimumLength
+        && password.Length <= MaximumLength
         && (!RequireUppercase || password.Any(char.IsUpper))
         && (!RequireLowercase || password.Any(char.IsLower))
         && (!RequireDigit || password.Any(char.IsDigit))

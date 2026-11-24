@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -36,6 +37,7 @@ public static class DependencyInjection
         AddOptions(services, configuration);
 
         services.AddScoped<TenantAuditingInterceptor>();
+        services.AddScoped<TenantRowLock>();
         services.AddDbContext<AppDbContext>((provider, options) =>
         {
             // Resolved lazily so configuration sources added later (tests, secrets,
@@ -133,7 +135,8 @@ public static class DependencyInjection
         // (containers, load-balanced replicas) you MUST configure a shared key ring,
         // e.g. Azure Key Vault, Redis, or a persistent shared volume, otherwise token
         // validation fails across instances.
-        services.AddDataProtection();
+        services.AddDataProtection()
+            .SetApplicationName("Multitenant.Api");
 
         return services;
     }
@@ -171,8 +174,16 @@ public static class DependencyInjection
                 "Email:Provider must be 'Logging' or 'Smtp'.")
             .Validate(
                 options => !string.Equals(options.Provider, "Smtp", StringComparison.OrdinalIgnoreCase)
-                    || !string.IsNullOrWhiteSpace(options.Smtp.Host),
+                    || (options.Smtp is not null && !string.IsNullOrWhiteSpace(options.Smtp.Host)),
                 "Email:Smtp:Host is required when Email:Provider is 'Smtp'.")
+            .Validate(
+                options => options.Smtp is not null && options.Smtp.Port is >= 1 and <= 65535,
+                "Email:Smtp:Port must be between 1 and 65535.")
+            .Validate(
+                options => options.Smtp is not null
+                    && string.IsNullOrWhiteSpace(options.Smtp.Username)
+                        == string.IsNullOrWhiteSpace(options.Smtp.Password),
+                "Email:Smtp:Username and Email:Smtp:Password must be configured together.")
             .ValidateOnStart();
 
         services.AddOptions<RateLimitingOptions>()
@@ -181,7 +192,7 @@ public static class DependencyInjection
             // DataAnnotations does not recurse into the nested policy objects.
             .Validate(
                 options => IsValidPolicy(options.Tenant) && IsValidPolicy(options.Auth),
-                "RateLimiting permit limits and window seconds must be positive.")
+                "RateLimiting permit limits must be 1–100,000 and window seconds must be 1–86,400.")
             .ValidateOnStart();
 
         services.AddOptions<DatabaseOptions>()
@@ -194,13 +205,28 @@ public static class DependencyInjection
 
         services.AddOptions<CorsOptions>()
             .Bind(configuration.GetSection(CorsOptions.SectionName))
+            .Validate(
+                options => options.AllowedOrigins is not null
+                    && options.AllowedOrigins.All(IsValidCorsOrigin),
+                "Cors:AllowedOrigins must contain explicit HTTPS origins, or HTTP loopback origins for local development.")
             .ValidateOnStart();
     }
 
-    private static bool IsValidPolicy(RateLimitPolicyOptions policy) =>
-        policy.PermitLimit > 0 && policy.WindowSeconds > 0;
+    private static bool IsValidPolicy(RateLimitPolicyOptions? policy) =>
+        policy is not null
+        && policy.PermitLimit is >= 1 and <= 100_000
+        && policy.WindowSeconds is >= 1 and <= 86_400;
 
     private static bool IsKnownEmailProvider(string provider) =>
         string.Equals(provider, "Logging", StringComparison.OrdinalIgnoreCase)
         || string.Equals(provider, "Smtp", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsValidCorsOrigin(string origin) =>
+        Uri.TryCreate(origin, UriKind.Absolute, out var uri)
+        && (uri.Scheme == Uri.UriSchemeHttps
+            || (uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback))
+        && string.IsNullOrEmpty(uri.UserInfo)
+        && string.IsNullOrEmpty(uri.Query)
+        && string.IsNullOrEmpty(uri.Fragment)
+        && (uri.AbsolutePath == "/" || uri.AbsolutePath.Length == 0);
 }

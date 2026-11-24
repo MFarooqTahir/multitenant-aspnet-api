@@ -68,6 +68,12 @@ public sealed class TenantAuditingInterceptor(ITenantContext tenantContext, Time
                 "A tenant-owned entity was written without a resolved tenant context.");
         }
 
+        if (entry.State == EntityState.Modified
+            && !Equals(entry.OriginalValues[nameof(ITenantOwned.TenantId)], entity.TenantId))
+        {
+            throw new ForbiddenException("Tenant ownership cannot be changed.", "tenant_mismatch");
+        }
+
         if (entity.TenantId == Guid.Empty)
         {
             if (entry.State != EntityState.Added)

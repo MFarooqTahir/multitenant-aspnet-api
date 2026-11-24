@@ -1,10 +1,13 @@
 using System.Net;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Multitenant.Application.Contracts.Tasks;
 using Multitenant.Application.Contracts.Tenants;
 using Multitenant.Application.Contracts.Users;
 using Multitenant.Domain.Entities;
 using Multitenant.IntegrationTests.Infrastructure;
+using Multitenant.Infrastructure.Persistence;
 
 namespace Multitenant.IntegrationTests;
 
@@ -19,7 +22,7 @@ public sealed class TenantFeatureTests : IntegrationTestBase
         using var client = CreateClient();
         var tenant = await Scenarios.OnboardAsync(client, "flag-default", "Flag Default", "flag-default@acme.test");
         var ownerTokens = await Scenarios.LoginAsync(client, tenant.Slug, "flag-default@acme.test");
-        var assignee = await CreateUserAsync(client, ownerTokens.AccessToken, "flag-default-assignee@acme.test");
+        var assignee = await Scenarios.CreateUserAsync(client, ownerTokens.AccessToken, "flag-default-assignee@acme.test");
         var project = await Scenarios.CreateProjectAsync(client, ownerTokens.AccessToken, "Flag Default Project");
 
         var features = await (await client.GetApi("/api/v1/tenants/current/features", ownerTokens.AccessToken))
@@ -34,6 +37,10 @@ public sealed class TenantFeatureTests : IntegrationTestBase
             ownerTokens.AccessToken);
 
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var task = await created.ReadAsync<TaskResponse>();
+        Assert.Equal("Assigned by default", task.Title);
+        Assert.Equal(project.Id, task.ProjectId);
+        Assert.Equal(assignee.Id, task.AssigneeUserId);
     }
 
     [Fact]
@@ -42,7 +49,7 @@ public sealed class TenantFeatureTests : IntegrationTestBase
         using var client = CreateClient();
         var tenant = await Scenarios.OnboardAsync(client, "flag-toggle", "Flag Toggle", "flag-toggle@acme.test");
         var ownerTokens = await Scenarios.LoginAsync(client, tenant.Slug, "flag-toggle@acme.test");
-        var assignee = await CreateUserAsync(client, ownerTokens.AccessToken, "flag-toggle-assignee@acme.test");
+        var assignee = await Scenarios.CreateUserAsync(client, ownerTokens.AccessToken, "flag-toggle-assignee@acme.test");
         var project = await Scenarios.CreateProjectAsync(client, ownerTokens.AccessToken, "Flag Toggle Project");
 
         var disabled = await client.PutApi(
@@ -93,7 +100,7 @@ public sealed class TenantFeatureTests : IntegrationTestBase
         using var client = CreateClient();
         var tenant = await Scenarios.OnboardAsync(client, "flag-member", "Flag Member", "flag-member@acme.test");
         var ownerTokens = await Scenarios.LoginAsync(client, tenant.Slug, "flag-member@acme.test");
-        await CreateUserAsync(client, ownerTokens.AccessToken, "flag-member-user@acme.test");
+        await Scenarios.CreateUserAsync(client, ownerTokens.AccessToken, "flag-member-user@acme.test");
         var memberTokens = await Scenarios.LoginAsync(client, tenant.Slug, "flag-member-user@acme.test");
 
         var read = await client.GetApi("/api/v1/tenants/current/features", memberTokens.AccessToken);
@@ -133,8 +140,8 @@ public sealed class TenantFeatureTests : IntegrationTestBase
         var alphaTokens = await Scenarios.LoginAsync(client, alpha.Slug, "flag-scope-a@acme.test");
         var betaTokens = await Scenarios.LoginAsync(client, beta.Slug, "flag-scope-b@acme.test");
 
-        var alphaAssignee = await CreateUserAsync(client, alphaTokens.AccessToken, "flag-scope-a-user@acme.test");
-        var betaAssignee = await CreateUserAsync(client, betaTokens.AccessToken, "flag-scope-b-user@acme.test");
+        var alphaAssignee = await Scenarios.CreateUserAsync(client, alphaTokens.AccessToken, "flag-scope-a-user@acme.test");
+        var betaAssignee = await Scenarios.CreateUserAsync(client, betaTokens.AccessToken, "flag-scope-b-user@acme.test");
         var alphaProject = await Scenarios.CreateProjectAsync(client, alphaTokens.AccessToken, "Alpha Scope");
         var betaProject = await Scenarios.CreateProjectAsync(client, betaTokens.AccessToken, "Beta Scope");
 
@@ -163,7 +170,7 @@ public sealed class TenantFeatureTests : IntegrationTestBase
         using var client = CreateClient();
         var tenant = await Scenarios.OnboardAsync(client, "flag-update", "Flag Update", "flag-update@acme.test");
         var ownerTokens = await Scenarios.LoginAsync(client, tenant.Slug, "flag-update@acme.test");
-        var assignee = await CreateUserAsync(client, ownerTokens.AccessToken, "flag-update-assignee@acme.test");
+        var assignee = await Scenarios.CreateUserAsync(client, ownerTokens.AccessToken, "flag-update-assignee@acme.test");
         var project = await Scenarios.CreateProjectAsync(client, ownerTokens.AccessToken, "Flag Update Project");
 
         var created = await client.PostApi(
@@ -195,17 +202,110 @@ public sealed class TenantFeatureTests : IntegrationTestBase
         Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
     }
 
-    private static async Task<UserResponse> CreateUserAsync(
-        HttpClient client,
-        string accessToken,
-        string email)
+    [Fact]
+    public async Task FeatureList_ContainsEveryWhitelistedKeyWithEffectiveValues()
     {
-        var response = await client.PostApi(
-            "/api/v1/users",
-            new CreateUserRequest(email, "Feature User", Scenarios.Password, TenantRoles.Member),
-            accessToken);
+        using var client = CreateClient();
+        var tenant = await Scenarios.OnboardAsync(client, "flag-list-content", "Flag List", "flag-list@acme.test");
+        var tokens = await Scenarios.LoginAsync(client, tenant.Slug, "flag-list@acme.test");
 
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        return await response.ReadAsync<UserResponse>();
+        var defaults = await (await client.GetApi("/api/v1/tenants/current/features", tokens.AccessToken))
+            .ReadAsync<List<TenantFeatureResponse>>();
+        Assert.Equal(TenantFeatureKeys.All, defaults.Select(feature => feature.Key));
+        Assert.All(defaults, feature => Assert.True(feature.IsEnabled));
+
+        var disabled = await client.PutApi(
+            "/api/v1/tenants/current/features/task_assignment",
+            new UpdateTenantFeatureRequest(false),
+            tokens.AccessToken);
+        Assert.Equal(HttpStatusCode.OK, disabled.StatusCode);
+        var effective = await (await client.GetApi("/api/v1/tenants/current/features", tokens.AccessToken))
+            .ReadAsync<List<TenantFeatureResponse>>();
+        var assignment = Assert.Single(effective, feature => feature.Key == TenantFeatureKeys.TaskAssignment);
+        Assert.False(assignment.IsEnabled);
     }
+
+    [Fact]
+    public async Task MissingIsEnabled_ReturnsValidationProblem()
+    {
+        using var client = CreateClient();
+        var tenant = await Scenarios.OnboardAsync(client, "flag-missing-value", "Flag Missing", "flag-missing@acme.test");
+        var tokens = await Scenarios.LoginAsync(client, tenant.Slug, "flag-missing@acme.test");
+
+        var response = await client.PutApi(
+            "/api/v1/tenants/current/features/task_assignment",
+            new { },
+            tokens.AccessToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.ReadAsync<ValidationProblemDetails>();
+        Assert.Equal("validation_failed", problem.Extensions["code"]?.ToString());
+        Assert.Contains("isEnabled", problem.Errors.Keys, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task TaskUpdate_UnchangedAssigneeIsAllowedWhenAssignmentDisabled()
+    {
+        using var client = CreateClient();
+        var tenant = await Scenarios.OnboardAsync(client, "flag-unchanged-assignee", "Flag Unchanged", "flag-unchanged@acme.test");
+        var tokens = await Scenarios.LoginAsync(client, tenant.Slug, "flag-unchanged@acme.test");
+        var assignee = await Scenarios.CreateUserAsync(client, tokens.AccessToken, "flag-unchanged-user@acme.test");
+        var project = await Scenarios.CreateProjectAsync(client, tokens.AccessToken, "Unchanged assignee project");
+        var created = await client.PostApi(
+            $"/api/v1/projects/{project.Id}/tasks",
+            new CreateTaskRequest("Assigned", null, WorkItemStatus.Todo, WorkItemPriority.Medium, assignee.Id, null),
+            tokens.AccessToken);
+        var task = await created.ReadAsync<TaskResponse>();
+        Assert.Equal(assignee.Id, task.AssigneeUserId);
+        await client.PutApi(
+            "/api/v1/tenants/current/features/task_assignment",
+            new UpdateTenantFeatureRequest(false),
+            tokens.AccessToken);
+
+        var response = await client.PutApi(
+            $"/api/v1/tasks/{task.Id}",
+            new UpdateTaskRequest("Still assigned", null, WorkItemStatus.InProgress, WorkItemPriority.High, assignee.Id, null),
+            tokens.AccessToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var updated = await response.ReadAsync<TaskResponse>();
+        Assert.Equal("Still assigned", updated.Title);
+        Assert.Equal(assignee.Id, updated.AssigneeUserId);
+    }
+
+    [Fact]
+    public async Task TaskUpdate_UnchangedInactiveAssigneeIsAllowedWhenAssignmentDisabled()
+    {
+        using var client = CreateClient();
+        var tenant = await Scenarios.OnboardAsync(client, "flag-inactive-assignee", "Flag Inactive", "flag-inactive@acme.test");
+        var tokens = await Scenarios.LoginAsync(client, tenant.Slug, "flag-inactive@acme.test");
+        var assignee = await Scenarios.CreateUserAsync(client, tokens.AccessToken, "flag-inactive-user@acme.test");
+        var project = await Scenarios.CreateProjectAsync(client, tokens.AccessToken, "Inactive assignee project");
+        var created = await client.PostApi(
+            $"/api/v1/projects/{project.Id}/tasks",
+            new CreateTaskRequest("Assigned", null, WorkItemStatus.Todo, WorkItemPriority.Medium, assignee.Id, null),
+            tokens.AccessToken);
+        var task = await created.ReadAsync<TaskResponse>();
+        using (var scope = Harness.Factory.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await dbContext.Database.ExecuteSqlAsync(
+                $"UPDATE \"AspNetUsers\" SET \"IsActive\" = FALSE WHERE \"Id\" = {assignee.Id}");
+        }
+        await client.PutApi(
+            "/api/v1/tenants/current/features/task_assignment",
+            new UpdateTenantFeatureRequest(false),
+            tokens.AccessToken);
+
+        var response = await client.PutApi(
+            $"/api/v1/tasks/{task.Id}",
+            new UpdateTaskRequest("Inactive assignee retained", null, WorkItemStatus.InProgress, WorkItemPriority.Medium, assignee.Id, null),
+            tokens.AccessToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var updated = await response.ReadAsync<TaskResponse>();
+        Assert.Equal(assignee.Id, updated.AssigneeUserId);
+        Assert.Equal("Inactive assignee retained", updated.Title);
+    }
+
 }

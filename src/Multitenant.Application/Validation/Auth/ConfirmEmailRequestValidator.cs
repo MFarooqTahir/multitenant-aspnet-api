@@ -8,6 +8,6 @@ public sealed class ConfirmEmailRequestValidator : AbstractValidator<ConfirmEmai
     public ConfirmEmailRequestValidator()
     {
         RuleFor(x => x.UserId).NotEmpty();
-        RuleFor(x => x.Token).NotEmpty();
+        RuleFor(x => x.Token).NotEmpty().MaximumLength(4096);
     }
 }

@@ -6,6 +6,8 @@
     <File Path="Directory.Build.props" />
     <File Path="AGENTS.md" />
     <File Path="README.md" />
+    <File Path=".gitleaks.toml" />
+    <File Path=".config/dotnet-tools.json" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Multitenant.Api/Multitenant.Api.csproj" />

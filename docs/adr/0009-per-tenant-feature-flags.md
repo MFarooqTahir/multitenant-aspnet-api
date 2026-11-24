@@ -26,14 +26,16 @@ Store a small, whitelisted set of feature overrides per tenant.
    before. Flags are per-tenant kill switches, not opt-ins, so deploying a new feature never
    silently disables it for existing tenants.
 3. **Owner-only writes, member reads.** `PUT /tenants/current/features/{key}` is restricted to
-   the `Owner` role at the controller and re-checked in `TenantFeatureService`; any member may
-   read the effective values.
+   the `Owner` role at the controller and re-checked under the tenant row lock in
+   `TenantFeatureService`; any member may read the effective values. The same lock serializes
+   concurrent first inserts and updates.
 4. **Consumers behave as if the capability does not exist.** A disabled feature returns
    `404 feature_disabled` (with a specific code such as `task_assignment_disabled`), matching the
    existing rule that the API does not advertise capabilities a caller cannot use.
-5. **One real consumer from day one.** `task_assignment` gates assigning a user to a task in
-   `TaskService`; creating or updating an unassigned task is unaffected. This keeps the
-   mechanism honest instead of adding a flag nothing checks.
+5. **One real consumer from day one.** `task_assignment` gates changing a task's assignee in
+   `TaskService`; creating or updating an unassigned task, or editing other fields while keeping
+   the current assignee, is unaffected. This keeps the mechanism honest instead of adding a flag
+   nothing checks.
 
 ## Consequences
 

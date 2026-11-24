@@ -9,5 +9,9 @@ public interface IJwtTokenGenerator
 
     TwoFactorChallenge CreateTwoFactorChallenge(AppUser user);
 
-    bool TryValidateTwoFactorChallenge(string token, out Guid userId, out Guid tenantId);
+    bool TryValidateTwoFactorChallenge(
+        string token,
+        out Guid userId,
+        out Guid tenantId,
+        out string? securityStamp);
 }

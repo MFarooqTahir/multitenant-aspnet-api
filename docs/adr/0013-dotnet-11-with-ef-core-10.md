@@ -5,7 +5,8 @@
 
 > **Update (2026-11-25):** Npgsql.EntityFrameworkCore.PostgreSQL 11.0.0 is now stable. ADR 0014
 > moves EF Core, Identity, health checks and Npgsql to 11.0.0. The Microsoft.OpenApi 2 /
-> Asp.Versioning.OpenApi constraint described here still applies.
+> Asp.Versioning.OpenApi constraint described here still applies. The current SDK policy is
+> `11.0.100` with `latestPatch`; Docker runtime/build images are digest-pinned to `11.0.0`.
 
 ## Context
 
@@ -28,8 +29,8 @@ releases.
 Target `net11.0` and the .NET 11 GA toolchain while keeping only the EF Core-bound packages on
 their stable 10.0.x line:
 
-- SDK `11.0.100` (`global.json`, `rollForward: latestFeature`), Docker images `11.0`, CI SDK
-  `11.0.100`.
+- SDK `11.0.100` (the original decision used `rollForward: latestFeature`; the current policy is
+  `latestPatch`), Docker images `11.0.0` runtime / `11.0.100` SDK, CI SDK `11.0.100`.
 - `Microsoft.AspNetCore.Authentication.JwtBearer`, `Microsoft.AspNetCore.Mvc.Testing` and
   `Serilog.AspNetCore` move to `11.0.0`.
 - EF Core `10.0.13`, `Microsoft.AspNetCore.Identity.EntityFrameworkCore` `10.0.13`,

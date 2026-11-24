@@ -22,14 +22,17 @@ Use NuGet Central Package Management (CPM):
   (`PrivateAssets`, `IncludeAssets`) stays with the reference.
 - A missing central version is a build error (NU1010), so a new package cannot be added
   without recording its version in one place.
-- Transitive pinning is deliberately **off**. The tests rely on the provider's transitive graph,
-  and enabling it would freeze indirect versions without a concrete need.
+- Transitive pinning is deliberately **off**. Instead, `RestorePackagesWithLockFile=true`
+  commits each project's resolved graph in `packages.lock.json`; CI and Docker restore with
+  `--locked-mode`. This preserves reproducibility without freezing every indirect package in
+  `Directory.Packages.props`.
 
 ## Consequences
 
 - Bumping a package is a one-line change; every project moves together.
 - CI, `dotnet list package` and Dependabot/Renovate all read the same source of truth.
 - Project files are shorter and diffs no longer repeat version strings.
+- Lock files make the same commit restore the same transitive versions on every machine.
 - The conversion was validated as version-neutral: 277 resolved package entries were identical
   before and after, so this is a build-tooling change, not a dependency upgrade.
 

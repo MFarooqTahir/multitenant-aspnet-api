@@ -23,7 +23,9 @@ namespace Multitenant.Api.RateLimiting;
 /// client IP to slow down credential stuffing before a tenant is known. Routine
 /// calls such as refresh and register intentionally stay on the global budget:
 /// they are not credential guesses, and a per-IP bucket shared by everyone behind
-/// one office NAT would otherwise lock out legitimate sessions.
+/// one office NAT would otherwise lock out legitimate sessions. Health probes use
+/// a separate per-IP global partition so they neither consume API budgets nor run
+/// without a bound.
 /// </para>
 /// <para>
 /// Options are resolved per request so configuration overrides (tests, environment
@@ -71,6 +73,13 @@ public static class RateLimitingSetup
 
     private static string TenantPartitionKey(HttpContext context)
     {
+        // Probes get their own per-IP bucket: they cannot exhaust a tenant's API
+        // budget, and a public readiness endpoint cannot drive unlimited DB checks.
+        if (context.Request.Path.Value is "/health" or "/health/live" or "/health/ready")
+        {
+            return $"health:{ClientIp(context)}";
+        }
+
         var tenantId = context.User.FindFirst(AuthClaims.TenantId)?.Value;
 
         return !string.IsNullOrWhiteSpace(tenantId)

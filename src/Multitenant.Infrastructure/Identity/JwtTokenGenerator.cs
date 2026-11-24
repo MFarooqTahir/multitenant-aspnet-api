@@ -21,6 +21,11 @@ public sealed class JwtTokenGenerator(
 
     public AccessToken CreateAccessToken(AppUser user, string role, string tenantSlug)
     {
+        if (string.IsNullOrEmpty(user.SecurityStamp))
+        {
+            throw new InvalidOperationException("Cannot issue an access token without a security stamp.");
+        }
+
         var now = timeProvider.GetUtcNow();
         var expires = now.AddMinutes(_jwt.AccessTokenMinutes);
 
@@ -32,10 +37,7 @@ public sealed class JwtTokenGenerator(
             new(AuthClaims.Email, user.Email ?? string.Empty),
             new(AuthClaims.Name, user.DisplayName),
             new(AuthClaims.Role, role),
-            new(AuthClaims.SecurityStamp, user.SecurityStamp ?? string.Empty),
-            // Note: when user.SecurityStamp is null, an empty string is stored.
-            // The validator in JwtBearerConfiguration treats a missing/empty stamp
-            // as "skip stamp validation" — see ValidateLiveUserAsync.
+            new(AuthClaims.SecurityStamp, user.SecurityStamp),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
         };
 
@@ -45,6 +47,11 @@ public sealed class JwtTokenGenerator(
 
     public TwoFactorChallenge CreateTwoFactorChallenge(AppUser user)
     {
+        if (string.IsNullOrEmpty(user.SecurityStamp))
+        {
+            throw new InvalidOperationException("Cannot issue a two-factor challenge without a security stamp.");
+        }
+
         var now = timeProvider.GetUtcNow();
         var expires = now.AddMinutes(_auth.TwoFactorChallengeMinutes);
 
@@ -52,6 +59,7 @@ public sealed class JwtTokenGenerator(
         {
             new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new(AuthClaims.TenantId, user.TenantId.ToString()),
+            new(AuthClaims.SecurityStamp, user.SecurityStamp),
             new(AuthClaims.Purpose, AuthClaims.TwoFactorPurpose),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
         };
@@ -60,10 +68,15 @@ public sealed class JwtTokenGenerator(
         return new TwoFactorChallenge(token, expires);
     }
 
-    public bool TryValidateTwoFactorChallenge(string token, out Guid userId, out Guid tenantId)
+    public bool TryValidateTwoFactorChallenge(
+        string token,
+        out Guid userId,
+        out Guid tenantId,
+        out string? securityStamp)
     {
         userId = Guid.Empty;
         tenantId = Guid.Empty;
+        securityStamp = null;
 
         try
         {
@@ -75,7 +88,10 @@ public sealed class JwtTokenGenerator(
                 return false;
             }
 
-            return Guid.TryParse(principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out userId)
+            securityStamp = principal.FindFirst(AuthClaims.SecurityStamp)?.Value;
+
+            return !string.IsNullOrEmpty(securityStamp)
+                && Guid.TryParse(principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out userId)
                 && Guid.TryParse(principal.FindFirst(AuthClaims.TenantId)?.Value, out tenantId);
         }
         catch (Exception)
@@ -110,6 +126,7 @@ public sealed class JwtTokenGenerator(
         IssuerSigningKey = SigningKey(),
         ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
         ValidateLifetime = true,
+        RequireExpirationTime = true,
         ClockSkew = TimeSpan.FromSeconds(30),
         NameClaimType = AuthClaims.Subject,
         RoleClaimType = AuthClaims.Role,

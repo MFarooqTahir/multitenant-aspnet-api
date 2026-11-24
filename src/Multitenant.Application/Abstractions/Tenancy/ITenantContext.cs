@@ -11,8 +11,9 @@ namespace Multitenant.Application.Abstractions.Tenancy;
 /// <item>EF Core global query filters, which add <c>TenantId = ...</c> to tenant-owned queries.</item>
 /// <item>The <c>SaveChanges</c> interceptor, which stamps and guards writes.</item>
 /// </list>
-/// The value is set once per request by JWT validation (authenticated calls) or by
-/// the anonymous flows that resolve a tenant before touching tenant-owned data.
+/// The value is set before tenant-filtered reads or tracked writes by JWT validation
+/// (authenticated calls) or by anonymous flows that resolve a tenant. Deliberate
+/// pre-resolution lookups use globally unique identifiers and explicit tenant predicates.
 /// </remarks>
 public interface ITenantContext
 {
@@ -26,8 +27,8 @@ public interface ITenantContext
     bool IsResolved { get; }
 
     /// <summary>
-    /// Binds the request to a tenant. Called exactly once per request, before any
-    /// tenant-owned read or write.
+    /// Binds the request to a tenant. Call before tenant-filtered reads or tracked writes.
+    /// Authenticated requests bind once; trusted startup seeding may bind sequentially.
     /// </summary>
     void SetTenant(Guid tenantId, string slug);
 }

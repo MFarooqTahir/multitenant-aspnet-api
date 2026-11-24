@@ -18,11 +18,39 @@ public sealed class RefreshTokenCleaner(
     public async Task<int> DeleteExpiredAsync(CancellationToken cancellationToken)
     {
         var cutoff = timeProvider.GetUtcNow().Subtract(TimeSpan.FromDays(options.Value.RetentionDays));
+        var deleted = 0;
 
-        return await dbContext.RefreshTokens
-            .Where(token =>
-                token.ExpiresAtUtc <= cutoff
-                || (token.RevokedAtUtc != null && token.RevokedAtUtc <= cutoff))
-            .ExecuteDeleteAsync(cancellationToken);
+        // Bound each statement and each pass so a large backlog cannot hold one
+        // transaction open or monopolize the database during startup.
+        for (var batch = 0; batch < options.Value.MaxBatchesPerPass; batch++)
+        {
+            var ids = await dbContext.RefreshTokens
+                .Where(token =>
+                    token.ExpiresAtUtc <= cutoff
+                    || (token.RevokedAtUtc != null && token.RevokedAtUtc <= cutoff))
+                .OrderBy(token => token.ExpiresAtUtc)
+                .Take(options.Value.BatchSize)
+                .Select(token => token.Id)
+                .ToListAsync(cancellationToken);
+
+            if (ids.Count == 0)
+            {
+                break;
+            }
+
+            var removed = await dbContext.RefreshTokens
+                .Where(token => ids.Contains(token.Id))
+                .ExecuteDeleteAsync(cancellationToken);
+
+            deleted += removed;
+
+            // Another replica may have won the race for this batch.
+            if (removed == 0 || ids.Count < options.Value.BatchSize)
+            {
+                break;
+            }
+        }
+
+        return deleted;
     }
 }

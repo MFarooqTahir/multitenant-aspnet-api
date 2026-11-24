@@ -45,6 +45,23 @@ public sealed partial class AuthConfirmationTests : IntegrationTestBase
         var html = await response.Content.ReadAsStringAsync();
         Assert.Contains("/api/v1/auth/confirm-email", html);
         Assert.Contains("window.location.hash", html);
+        Assert.True(
+            html.IndexOf("history.replaceState", StringComparison.Ordinal)
+                < html.IndexOf("fetch(", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task InvalidConfirmationToken_ReturnsBadRequestWithStableCode()
+    {
+        using var client = CreateClient();
+
+        var response = await client.PostApi(
+            "/api/v1/auth/confirm-email",
+            new ConfirmEmailRequest(Guid.NewGuid(), "invalid-confirmation-token"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.ReadAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
+        Assert.Equal("invalid_confirmation_token", problem.Extensions["code"]?.ToString());
     }
 
     [Fact]
@@ -53,11 +70,12 @@ public sealed partial class AuthConfirmationTests : IntegrationTestBase
         var sender = new CapturingEmailSender();
         await using var factory = Harness.CreateFactory(
             configuration => configuration["Identity:RequireConfirmedEmail"] = "true",
-            services =>
+            configureServices: services =>
             {
                 services.RemoveAll<IEmailSender>();
                 services.AddSingleton<IEmailSender>(sender);
-            });
+            },
+            environment: "Development");
         using var client = factory.CreateClient();
 
         await Scenarios.OnboardAsync(client, "confirm-on", "Confirm On", "confirm-on@acme.test");

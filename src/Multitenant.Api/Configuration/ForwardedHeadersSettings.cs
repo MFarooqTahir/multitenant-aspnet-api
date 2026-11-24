@@ -28,10 +28,16 @@ public sealed class ForwardedHeadersSettings
 
     public void Apply(ForwardedHeadersOptions options)
     {
+        if (ForwardLimit is < 1 or > 20)
+        {
+            throw new InvalidOperationException(
+                "ForwardedHeaders:ForwardLimit must be between 1 and 20.");
+        }
+
         options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
         options.ForwardLimit = ForwardLimit;
 
-        foreach (var proxy in KnownProxies)
+        foreach (var proxy in KnownProxies ?? [])
         {
             if (!IPAddress.TryParse(proxy, out var address))
             {
@@ -42,7 +48,7 @@ public sealed class ForwardedHeadersSettings
             options.KnownProxies.Add(address);
         }
 
-        foreach (var network in KnownNetworks)
+        foreach (var network in KnownNetworks ?? [])
         {
             var parts = network.Split('/');
             if (parts.Length != 2

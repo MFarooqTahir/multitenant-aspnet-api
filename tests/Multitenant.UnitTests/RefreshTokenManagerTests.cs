@@ -16,15 +16,20 @@ public sealed class RefreshTokenManagerTests
     }
 
     [Fact]
-    public void CreatesUrlSafeOpaqueTokens()
+    public void Hash_KnownSha256Value_UsesBase64Url()
+    {
+        Assert.Equal("ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0", RefreshTokenManager.Hash("abc"));
+    }
+
+    [Fact]
+    public void CreatesUrlSafeOpaqueTokens_WithExactLengthAndAlphabet()
     {
         var token = RefreshTokenManager.CreateRawToken();
 
-        Assert.False(string.IsNullOrWhiteSpace(token));
-        Assert.True(token.Length is > 20 and <= 128);
-        Assert.DoesNotContain('=', token);
-        Assert.DoesNotContain('+', token);
-        Assert.DoesNotContain('/', token);
+        Assert.Equal(43, token.Length);
+        Assert.Matches("^[A-Za-z0-9_-]+$", token);
+        var bytes = Convert.FromBase64String(token.Replace('-', '+').Replace('_', '/') + "=");
+        Assert.Equal(32, bytes.Length);
     }
 
     [Fact]

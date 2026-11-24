@@ -97,19 +97,28 @@ public static class ApiProblemDetails
     /// </summary>
     public static ProblemDetails? CreateForStatus(HttpContext context, int statusCode)
     {
-        var (title, code) = statusCode switch
-        {
-            StatusCodes.Status401Unauthorized => ("Unauthorized", "unauthorized"),
-            StatusCodes.Status403Forbidden => ("Forbidden", "forbidden"),
-            StatusCodes.Status404NotFound => ("Not Found", "not_found"),
-            StatusCodes.Status405MethodNotAllowed => ("Method Not Allowed", "method_not_allowed"),
-            _ => (string.Empty, string.Empty),
-        };
+        var (title, code) = StatusDetails(statusCode);
 
         return string.IsNullOrEmpty(code)
             ? null
             : Create(context, statusCode, title, code);
     }
+
+    public static string? CodeForStatus(int statusCode) => StatusDetails(statusCode).Code;
+
+    private static (string Title, string Code) StatusDetails(int statusCode) => statusCode switch
+    {
+        StatusCodes.Status400BadRequest => ("Bad Request", "invalid_request"),
+        StatusCodes.Status401Unauthorized => ("Unauthorized", "unauthorized"),
+        StatusCodes.Status403Forbidden => ("Forbidden", "forbidden"),
+        StatusCodes.Status404NotFound => ("Not Found", "not_found"),
+        StatusCodes.Status405MethodNotAllowed => ("Method Not Allowed", "method_not_allowed"),
+        StatusCodes.Status413PayloadTooLarge => ("Payload Too Large", "payload_too_large"),
+        StatusCodes.Status415UnsupportedMediaType => ("Unsupported Media Type", "unsupported_media_type"),
+        StatusCodes.Status429TooManyRequests => ("Too Many Requests", "rate_limited"),
+        StatusCodes.Status500InternalServerError => ("Internal Server Error", "internal_error"),
+        _ => (string.Empty, string.Empty),
+    };
 
     /// <summary>Maps a status code to the RFC 9110 (or RFC 6585) section that defines it.</summary>
     public static string TypeFor(int statusCode) => statusCode switch
@@ -120,6 +129,8 @@ public static class ApiProblemDetails
         StatusCodes.Status404NotFound => "https://datatracker.ietf.org/doc/html/rfc9110#section-15.5.5",
         StatusCodes.Status405MethodNotAllowed => "https://datatracker.ietf.org/doc/html/rfc9110#section-15.5.6",
         StatusCodes.Status409Conflict => "https://datatracker.ietf.org/doc/html/rfc9110#section-15.5.10",
+        StatusCodes.Status413PayloadTooLarge => "https://datatracker.ietf.org/doc/html/rfc9110#section-15.5.14",
+        StatusCodes.Status415UnsupportedMediaType => "https://datatracker.ietf.org/doc/html/rfc9110#section-15.5.16",
         StatusCodes.Status429TooManyRequests => "https://datatracker.ietf.org/doc/html/rfc6585#section-4",
         _ => "https://datatracker.ietf.org/doc/html/rfc9110#section-15.6.1",
     };

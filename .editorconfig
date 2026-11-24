@@ -18,3 +18,8 @@ indent_size = 2
 [*.{csproj,props,targets,slnx}]
 indent_style = space
 indent_size = 2
+
+# EF Core generated migrations legitimately use constant arrays. Keep this
+# suppression scoped to generated migration code, not all production code.
+[src/Multitenant.Infrastructure/Persistence/Migrations/*.cs]
+dotnet_diagnostic.CA1861.severity = none

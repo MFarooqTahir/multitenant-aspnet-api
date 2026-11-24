@@ -7,7 +7,6 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
-    <!-- EF Core generated migrations legitimately use constant arrays. -->
-    <NoWarn>$(NoWarn);CA1861</NoWarn>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
 </Project>

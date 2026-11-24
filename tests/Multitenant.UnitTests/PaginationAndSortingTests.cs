@@ -13,6 +13,9 @@ public sealed class PaginationAndSortingTests
 
         var (_, max) = Pagination.Normalize(1, 500);
         Assert.Equal(100, max);
+
+        var (cappedPage, _) = Pagination.Normalize(int.MaxValue, 20);
+        Assert.Equal(10_000, cappedPage);
     }
 
     [Fact]

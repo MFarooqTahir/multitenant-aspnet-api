@@ -1,6 +1,6 @@
 ﻿services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:f2f98726820d0342055351c6e9d36e705f5bfffb3dd53ff556325114b08afb6d
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-multitenant-DbUser}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-multitenant-DbPassword123!}
@@ -28,6 +28,16 @@
       # The demo overlay seeds known accounts, so keep the API on loopback just
       # like PostgreSQL. Put a TLS-terminating proxy in front for shared access.
       - "127.0.0.1:${API_PORT:-8080}:8080"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev
+    volumes:
+      - data-protection-keys:/home/app/.aspnet/DataProtection-Keys
     depends_on:
       postgres:
         condition: service_healthy
@@ -36,7 +46,7 @@
       # someone exposes the demo stack. Set Development for readable console logs.
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       ASPNETCORE_HTTP_PORTS: 8080
-      ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-multitenantDb};Username=${POSTGRES_USER:-multitenant-DbUser};Password=${POSTGRES_PASSWORD:-multitenant-DbPassword123!}"
+      ConnectionStrings__Postgres: ${POSTGRES_CONNECTION_STRING:-Host=postgres;Port=5432;Database=${POSTGRES_DB:-multitenantDb};Username=${POSTGRES_USER:-multitenant-DbUser};Password=${POSTGRES_PASSWORD:-multitenant-DbPassword123!}}
       # Demo-only known key by default. Safe only because this compose file binds
       # the API to loopback; generate a real key before putting it behind a proxy.
       # openssl rand -base64 48
@@ -52,3 +62,5 @@ volumes:
   # Named volume: the database survives `down`, rebuilds and container restarts.
   # `docker compose down -v` is the only thing that deletes it.
   postgres-data:
+  # Keeps Identity/Data Protection tokens valid across API container replacement.
+  data-protection-keys:

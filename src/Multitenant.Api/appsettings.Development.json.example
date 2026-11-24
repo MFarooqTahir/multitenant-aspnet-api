@@ -1,0 +1,21 @@
+{
+  "ConnectionStrings": {
+    "Postgres": "Host=localhost;Port=5432;Database=multitenantDb;Username=multitenant-DbUser;Password=multitenant-DbPassword123!"
+  },
+  "Jwt": {
+    "SigningKey": "local-development-key-rotated-2026-11-25-0123456789abcdef"
+  },
+  "Auth": {
+    "PublicBaseUrl": "http://localhost:5270"
+  },
+  "Demo": {
+    "Password": "Demo123!Passw0rd"
+  },
+  "Database": {
+    "AutoMigrate": true,
+    "SeedDemoData": true
+  },
+  "Email": {
+    "Provider": "Logging"
+  }
+}

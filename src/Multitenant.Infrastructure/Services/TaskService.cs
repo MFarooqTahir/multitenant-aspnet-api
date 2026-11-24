@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Multitenant.Application.Abstractions.Tenancy;
 using Multitenant.Application.Common.Paging;
+using Multitenant.Application.Common.Search;
 using Multitenant.Application.Contracts.Common;
 using Multitenant.Application.Contracts.Tasks;
 using Multitenant.Application.Errors.Exceptions;
@@ -10,8 +11,8 @@ using Multitenant.Infrastructure.Persistence;
 namespace Multitenant.Infrastructure.Services;
 
 /// <summary>
-/// Tasks of the current tenant. Reads rely on the EF query filter; assignment is
-/// checked against the tenant's feature switch and against a tenant-scoped user lookup.
+/// Tasks of the current tenant. Reads rely on the EF query filter; assignment changes
+/// are checked against the tenant's feature switch and a tenant-scoped user lookup.
 /// </summary>
 public sealed class TaskService(
     AppDbContext dbContext,
@@ -35,10 +36,10 @@ public sealed class TaskService(
 
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
-            var search = $"%{query.Search.Trim()}%";
+            var search = SearchPattern.Contains(query.Search);
             tasks = tasks.Where(x =>
-                EF.Functions.ILike(x.Title, search)
-                || EF.Functions.ILike(x.Description ?? string.Empty, search));
+                EF.Functions.ILike(x.Title, search, SearchPattern.EscapeCharacter)
+                || EF.Functions.ILike(x.Description ?? string.Empty, search, SearchPattern.EscapeCharacter));
         }
 
         if (query.Status is not null)
@@ -76,12 +77,12 @@ public sealed class TaskService(
 
         tasks = field switch
         {
-            "title" => descending ? tasks.OrderByDescending(x => x.Title) : tasks.OrderBy(x => x.Title),
-            "status" => descending ? tasks.OrderByDescending(x => x.Status) : tasks.OrderBy(x => x.Status),
-            "priority" => descending ? tasks.OrderByDescending(x => x.Priority) : tasks.OrderBy(x => x.Priority),
-            "duedate" => descending ? tasks.OrderByDescending(x => x.DueDate) : tasks.OrderBy(x => x.DueDate),
-            "updatedat" => descending ? tasks.OrderByDescending(x => x.UpdatedAtUtc) : tasks.OrderBy(x => x.UpdatedAtUtc),
-            _ => descending ? tasks.OrderByDescending(x => x.CreatedAtUtc) : tasks.OrderBy(x => x.CreatedAtUtc),
+            "title" => descending ? tasks.OrderByDescending(x => x.Title).ThenByDescending(x => x.Id) : tasks.OrderBy(x => x.Title).ThenBy(x => x.Id),
+            "status" => descending ? tasks.OrderByDescending(x => x.Status).ThenByDescending(x => x.Id) : tasks.OrderBy(x => x.Status).ThenBy(x => x.Id),
+            "priority" => descending ? tasks.OrderByDescending(x => x.Priority).ThenByDescending(x => x.Id) : tasks.OrderBy(x => x.Priority).ThenBy(x => x.Id),
+            "duedate" => descending ? tasks.OrderByDescending(x => x.DueDate).ThenByDescending(x => x.Id) : tasks.OrderBy(x => x.DueDate).ThenBy(x => x.Id),
+            "updatedat" => descending ? tasks.OrderByDescending(x => x.UpdatedAtUtc).ThenByDescending(x => x.Id) : tasks.OrderBy(x => x.UpdatedAtUtc).ThenBy(x => x.Id),
+            _ => descending ? tasks.OrderByDescending(x => x.CreatedAtUtc).ThenByDescending(x => x.Id) : tasks.OrderBy(x => x.CreatedAtUtc).ThenBy(x => x.Id),
         };
 
         var items = await tasks
@@ -168,8 +169,12 @@ public sealed class TaskService(
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken)
             ?? throw new NotFoundException("Task not found.");
 
-        await EnsureTaskAssignmentEnabledAsync(request.AssigneeUserId, cancellationToken);
-        await EnsureAssigneeBelongsToTenantAsync(request.AssigneeUserId, cancellationToken);
+        var assigneeChanged = task.AssigneeUserId != request.AssigneeUserId;
+        if (assigneeChanged)
+        {
+            await EnsureTaskAssignmentEnabledAsync(request.AssigneeUserId, cancellationToken);
+            await EnsureAssigneeBelongsToTenantAsync(request.AssigneeUserId, cancellationToken);
+        }
 
         task.Title = request.Title.Trim();
         task.Description = NormalizeDescription(request.Description);

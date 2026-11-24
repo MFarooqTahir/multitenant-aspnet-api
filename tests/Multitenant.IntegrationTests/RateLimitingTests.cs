@@ -122,20 +122,76 @@ public sealed class RateLimitingTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task HealthChecksAreNotRateLimited()
+    public async Task LoginConsumesAuthPermitWhileRefreshUsesGlobalBudget()
     {
+        AuthTokens tokens;
+        using (var setupFactory = Harness.CreateFactory(configuration =>
+            configuration["Auth:SingleSessionPerUser"] = "false"))
+        using (var setupClient = setupFactory.CreateClient())
+        {
+            tokens = await Scenarios.OnboardAndLoginAsync(setupClient, "rate-shared-budget", "rate-shared@acme.test");
+        }
+
+        await using var factory = Harness.CreateFactory(configuration =>
+        {
+            configuration["Auth:SingleSessionPerUser"] = "false";
+            configuration["RateLimiting:Auth:PermitLimit"] = "1";
+            configuration["RateLimiting:Auth:WindowSeconds"] = "60";
+            configuration["RateLimiting:Tenant:PermitLimit"] = "1000";
+        });
+        using var client = factory.CreateClient();
+
+        var login = await client.PostApi(
+            "/api/v1/auth/login",
+            new LoginRequest("rate-shared-budget", "rate-shared@acme.test", Scenarios.Password));
+        var refreshed = await client.PostApi(
+            "/api/v1/auth/refresh",
+            new RefreshTokenRequest(tokens.RefreshToken));
+        var throttled = await client.PostApi(
+            "/api/v1/auth/login",
+            new LoginRequest("rate-shared-budget", "rate-shared@acme.test", Scenarios.Password));
+
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, refreshed.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, throttled.StatusCode);
+        Assert.True(throttled.Headers.TryGetValues("Retry-After", out var retryAfter));
+        Assert.True(int.Parse(retryAfter.Single(), System.Globalization.CultureInfo.InvariantCulture) > 0);
+        var problem = await throttled.ReadAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
+        Assert.Equal("rate_limited", problem.Extensions["code"]?.ToString());
+    }
+
+    [Fact]
+    public async Task HealthProbes_UseSeparateIpBudgetAndEventuallyReturn429()
+    {
+        AuthTokens tokens;
+        using (var setupClient = CreateClient())
+        {
+            tokens = await Scenarios.OnboardAndLoginAsync(setupClient, "rate-health", "rate-health@acme.test");
+        }
+
         await using var factory = Harness.CreateFactory(configuration =>
         {
             configuration["RateLimiting:Tenant:PermitLimit"] = "1";
             configuration["RateLimiting:Tenant:WindowSeconds"] = "60";
+            configuration["RateLimiting:Auth:PermitLimit"] = "1";
+            configuration["RateLimiting:Auth:WindowSeconds"] = "60";
         });
         using var client = factory.CreateClient();
 
-        // Health probes must keep responding even when the request budget is gone.
-        for (var i = 0; i < 5; i++)
-        {
-            var live = await client.GetApi("/health/live");
-            Assert.Equal(HttpStatusCode.OK, live.StatusCode);
-        }
+        var failedLogin = await client.PostApi(
+            "/api/v1/auth/login",
+            new LoginRequest("rate-health", "rate-health@acme.test", "WrongPassword1!"));
+        var api = await client.GetApi("/api/v1/tenants/current", tokens.AccessToken);
+        var exhaustedApi = await client.GetApi("/api/v1/tenants/current", tokens.AccessToken);
+        var firstHealth = await client.GetApi("/health/live");
+        var throttledHealth = await client.GetApi("/health/live");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, failedLogin.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, api.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, exhaustedApi.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, firstHealth.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, throttledHealth.StatusCode);
+        Assert.True(throttledHealth.Headers.TryGetValues("Retry-After", out var retryAfter));
+        Assert.True(int.Parse(retryAfter.Single(), System.Globalization.CultureInfo.InvariantCulture) > 0);
     }
 }

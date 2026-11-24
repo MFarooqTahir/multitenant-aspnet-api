@@ -31,10 +31,12 @@ flowchart TD
 ```mermaid
 flowchart TD
     A["Request"] --> B["CorrelationIdMiddleware<br/>X-Correlation-Id + Serilog context"]
-    B --> C["ExceptionHandler<br/>problem+json + code"]
-    C --> D["StatusCodePages<br/>401/403/404/405 → problem+json"]
-    D --> E["Serilog request logging"]
-    E --> F["CORS (if configured)"]
+    B --> B2["SecurityHeadersMiddleware<br/>nosniff · no-referrer · frame denial"]
+    B2 --> E["Serilog request logging<br/>final status · query string omitted"]
+    E --> C["ExceptionHandler<br/>problem+json + code"]
+    C --> D["StatusCodePages<br/>401/403/404/405/413/415 → problem+json"]
+    D --> E2["HTTPS redirection / HSTS"]
+    E2 --> F["CORS (if configured)"]
     F --> G["Authentication<br/>JWT validation + live security stamp/role check"]
     G --> H["RateLimiter<br/>tenant partition / auth IP partition"]
     H --> I["Authorization<br/>Owner · Admin · Member policies"]
@@ -102,11 +104,13 @@ Three layers, each independent of the others:
 1. **Read** — EF Core global query filters on `AppUser`, `Project` and `WorkItem`. The filter
    reads `AppDbContext.CurrentTenantId` (a `DbContext` property, not a captured service), so
    EF's model cache stays valid.
-2. **Write** — `TenantAuditingInterceptor` stamps `TenantId` on inserts and rejects writes whose
-   tenant differs from the resolved one.
-3. **Referential** — composite foreign keys on `(TenantId, Id)` for projects and task
-   assignees, plus `CK_WorkItems_AssigneeTenant`, which requires both assignee columns to be set
-   together (the composite FK is MATCH SIMPLE, so a NULL would otherwise skip the check).
+2. **Tracked writes** — `TenantAuditingInterceptor` stamps `TenantId` on inserts, rejects writes
+   whose tenant differs from the resolved one, and rejects `TenantId` changes after insert.
+   Set-based refresh-token revocation carries an explicit `TenantId`; retention is deliberately
+   global.
+3. **Referential** — composite foreign keys on `(TenantId, Id)` for projects, task assignees and
+   refresh tokens, plus `CK_WorkItems_AssigneeTenant`, which requires both assignee columns to be
+   set together (the composite FK is MATCH SIMPLE, so a NULL would otherwise skip the check).
 
 Cross-tenant reads and writes return **404**, never 403, so the API does not confirm that a
 resource exists in another tenant.
@@ -175,7 +179,7 @@ erDiagram
     RefreshTokens {
         uuid Id PK
         uuid UserId FK
-        uuid TenantId
+        uuid TenantId FK
         varchar TokenHash UK
         uuid FamilyId
         timestamptz CreatedAtUtc
@@ -190,11 +194,15 @@ erDiagram
 `AspNetRoleClaims`, `AspNetUserClaims`, `AspNetUserLogins`, `AspNetUserTokens` and
 `AspNetUserPasskeys` are the standard Identity tables and are omitted for readability.
 `AspNetUsers` and `Projects` also carry a unique alternate key on `(TenantId, Id)` so
-`WorkItems` can reference them with composite foreign keys.
+`WorkItems` and `RefreshTokens` can reference them with composite foreign keys. `Projects` and
+`WorkItems` use PostgreSQL's existing `xmin` system column as an optimistic-concurrency token;
+it is not a physical application column.
 
-Schema and demo data are created by the migrations in `Persistence/Migrations`
-(`InitialCreate`, then `TenantFeatures`), applied automatically when `Database:AutoMigrate` is
-on.
+Schema is created by the migrations in `Persistence/Migrations` (`InitialCreate`, then
+`TenantFeatures`, `RefreshTokenIntegrityAndRetention` and the no-DDL `OptimisticConcurrencyTokens`
+model update), applied automatically when `Database:AutoMigrate` is on. Demo data is seeded
+separately by `DatabaseInitializer` only when `Database:SeedDemoData` is on; roles are always
+ensured.
 
 ## Where to look
 
@@ -203,6 +211,7 @@ on.
 | Tenant resolution + live token checks | `src/Multitenant.Infrastructure/Identity/JwtBearerConfiguration.cs` |
 | Query filters and model configuration | `src/Multitenant.Infrastructure/Persistence/AppDbContext.cs` |
 | Write guard + timestamp stamping | `src/Multitenant.Infrastructure/Persistence/TenantAuditingInterceptor.cs` |
+| Pessimistic tenant-row serialization | `src/Multitenant.Infrastructure/Persistence/TenantRowLock.cs` |
 | Login, refresh, 2FA, registration | `src/Multitenant.Infrastructure/Identity/AuthService.cs` |
 | User creation (registration + admin) | `src/Multitenant.Infrastructure/Identity/UserProvisioningService.cs` |
 | Refresh token hashing/rotation helpers | `src/Multitenant.Infrastructure/Identity/RefreshTokenManager.cs` |

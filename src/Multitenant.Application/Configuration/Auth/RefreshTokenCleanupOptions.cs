@@ -17,4 +17,10 @@ public sealed class RefreshTokenCleanupOptions
 
     [Range(1, 365)]
     public int RetentionDays { get; set; } = 30;
+
+    [Range(100, 10_000)]
+    public int BatchSize { get; set; } = 1_000;
+
+    [Range(1, 100)]
+    public int MaxBatchesPerPass { get; set; } = 100;
 }

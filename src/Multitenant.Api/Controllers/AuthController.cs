@@ -14,6 +14,7 @@ namespace Multitenant.Api.Controllers;
 
 [ApiController]
 [ApiVersion("1.0")]
+[RequestSizeLimit(16_384)]
 [Route("api/v{version:apiVersion}/auth")]
 public sealed class AuthController(IAuthService authService) : ControllerBase
 {
@@ -53,10 +54,11 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<UserResponse>> Register(
         RegisterRequest request,
-        CancellationToken cancellationToken) =>
-        StatusCode(
-            StatusCodes.Status201Created,
-            await authService.RegisterAsync(request, cancellationToken));
+        CancellationToken cancellationToken)
+    {
+        var user = await authService.RegisterAsync(request, cancellationToken);
+        return Created($"/api/v1/users/{user.Id}", user);
+    }
 
     /// <summary>Exchanges a refresh token for a new token pair (rotation + reuse detection).</summary>
     [HttpPost("refresh")]
@@ -91,13 +93,13 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
 
     /// <summary>
     /// Completes email confirmation using the token from the confirmation email.
-    /// The token is sent in the request body (not the query string) so it is not
-    /// captured by proxy logs, browser history or Referer headers.
+    /// The token is sent in the request body (not the query string); the browser page
+    /// removes its URL fragment before posting, and proxies/Referer headers never see it.
     /// </summary>
     [HttpPost("confirm-email")]
     [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> ConfirmEmail(
         ConfirmEmailRequest request,
         CancellationToken cancellationToken)
@@ -122,6 +124,7 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     /// <summary>Starts authenticator-app setup; returns the shared key and otpauth URI.</summary>
     [HttpPost("2fa/setup")]
     [Authorize]
+    [NoStoreResponse]
     [ProducesResponseType<TwoFactorSetupResponse>(StatusCodes.Status200OK)]
     public async Task<ActionResult<TwoFactorSetupResponse>> SetupTwoFactor(CancellationToken cancellationToken) =>
         Ok(await authService.SetupTwoFactorAsync(cancellationToken));
@@ -129,6 +132,7 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     /// <summary>Confirms the first authenticator code, enables 2FA and returns recovery codes.</summary>
     [HttpPost("2fa/enable")]
     [Authorize]
+    [NoStoreResponse]
     [ProducesResponseType<TwoFactorEnabledResponse>(StatusCodes.Status200OK)]
     public async Task<ActionResult<TwoFactorEnabledResponse>> EnableTwoFactor(
         TwoFactorEnableRequest request,

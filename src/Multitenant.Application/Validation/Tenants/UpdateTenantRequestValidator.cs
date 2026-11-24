@@ -8,8 +8,7 @@ public sealed class UpdateTenantRequestValidator : AbstractValidator<UpdateTenan
     public UpdateTenantRequestValidator()
     {
         RuleFor(x => x.Name)
-            .NotEmpty()
-            .MinimumLength(2)
-            .MaximumLength(120);
+            .Must(name => name?.Trim().Length is >= 2 and <= 120)
+            .WithMessage("Name must be between 2 and 120 characters after trimming.");
     }
 }

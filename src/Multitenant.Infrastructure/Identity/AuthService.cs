@@ -20,12 +20,15 @@ namespace Multitenant.Infrastructure.Identity;
 /// refresh-token rotation, logout, email confirmation and registration.
 /// </summary>
 /// <remarks>
-/// Tenant-owned tables are protected by global query filters, so any lookup that
+/// Tenant-filtered tables are protected by global query filters, so a user lookup that
 /// runs before a tenant is known uses <c>IgnoreQueryFilters()</c> together with an
 /// explicit tenant predicate. The tenant context is then set before Identity writes.
+/// <c>RefreshTokens</c> is deliberately unfiltered and uses unique hashes plus explicit
+/// tenant predicates for pre-resolution revocation.
 /// </remarks>
 public sealed class AuthService(
     AppDbContext dbContext,
+    TenantRowLock tenantRowLock,
     UserManager<AppUser> userManager,
     SignInManager<AppUser> signInManager,
     ITenantContext tenantContext,
@@ -128,6 +131,27 @@ public sealed class AuthService(
                 "tenant_mismatch");
         }
 
+        // Re-check the caller's live role under the tenant lock. The access token
+        // was valid when the request began, but an Owner may have demoted this
+        // Admin while the request was in flight.
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await tenantRowLock.AcquireAsync(cancellationToken);
+
+        var actor = await dbContext.Users
+            .FirstOrDefaultAsync(x => x.Id == currentUser.UserId, cancellationToken)
+            ?? throw new UnauthorizedException();
+
+        if (!actor.IsActive)
+        {
+            throw new UnauthorizedException();
+        }
+
+        var actorRole = TenantRoles.Normalize(await GetRoleAsync(actor));
+        if (actorRole is not (TenantRoles.Owner or TenantRoles.Admin))
+        {
+            throw new ForbiddenException("Members cannot register users.", "role_not_allowed");
+        }
+
         var user = await userProvisioning.CreateAsync(
             tenantId,
             tenantSlug,
@@ -137,6 +161,10 @@ public sealed class AuthService(
             TenantRoles.Member,
             cancellationToken);
 
+        await transaction.CommitAsync(cancellationToken);
+
+        // Delivery is a side effect and must not hold the tenant lock or roll back
+        // an already-committed user.
         await accountEmailService.SendConfirmationEmailAsync(user, cancellationToken);
 
         return userProvisioning.ToResponse(user, TenantRoles.Member);
@@ -158,6 +186,7 @@ public sealed class AuthService(
         if (stored.RevokedAtUtc is not null)
         {
             await refreshTokenManager.RevokeFamilyAsync(
+                stored.TenantId,
                 stored.FamilyId,
                 "refresh_token_reuse",
                 cancellationToken);
@@ -171,16 +200,30 @@ public sealed class AuthService(
             throw new UnauthorizedException("Refresh token has expired.", "refresh_token_expired");
         }
 
-        var user = await dbContext.Users
-            .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(
-                x => x.Id == stored.UserId && x.TenantId == stored.TenantId,
-                cancellationToken);
+        var state = await (
+                from tokenUser in dbContext.Users.IgnoreQueryFilters()
+                join tenant in dbContext.Tenants on tokenUser.TenantId equals tenant.Id
+                where tokenUser.Id == stored.UserId && tokenUser.TenantId == stored.TenantId
+                select new
+                {
+                    User = tokenUser,
+                    tenant.IsActive,
+                    tenant.Slug,
+                    Role = (
+                        from userRole in dbContext.UserRoles
+                        join role in dbContext.Roles on userRole.RoleId equals role.Id
+                        where userRole.UserId == tokenUser.Id
+                        select role.Name
+                    ).FirstOrDefault(),
+                })
+            .FirstOrDefaultAsync(cancellationToken);
 
-        if (user is null || !user.IsActive)
+        if (state is null || !state.User.IsActive || !state.IsActive)
         {
             throw InvalidRefreshToken();
         }
+
+        var user = state.User;
 
         // Sessions created while confirmation was optional must not keep minting
         // access tokens after RequireConfirmedEmail is switched on.
@@ -191,21 +234,15 @@ public sealed class AuthService(
                 "email_not_confirmed");
         }
 
-        var tenant = await FindTenantByIdAsync(user.TenantId, cancellationToken);
-        if (tenant is null || !tenant.IsActive)
-        {
-            throw InvalidRefreshToken();
-        }
-
-        tenantContext.SetTenant(tenant.Id, tenant.Slug);
-        var role = await GetRoleAsync(user);
+        tenantContext.SetTenant(user.TenantId, state.Slug);
+        var role = state.Role ?? TenantRoles.Member;
         var replacementId = Guid.NewGuid();
 
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
         // Conditional update: only the request that wins the race can rotate this token.
         var rotated = await dbContext.RefreshTokens
-            .Where(x => x.Id == stored.Id && x.RevokedAtUtc == null)
+            .Where(x => x.Id == stored.Id && x.TenantId == stored.TenantId && x.RevokedAtUtc == null)
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(x => x.RevokedAtUtc, now)
@@ -217,6 +254,7 @@ public sealed class AuthService(
         {
             await transaction.RollbackAsync(cancellationToken);
             await refreshTokenManager.RevokeFamilyAsync(
+                stored.TenantId,
                 stored.FamilyId,
                 "refresh_token_reuse",
                 cancellationToken);
@@ -230,10 +268,14 @@ public sealed class AuthService(
                 await userManager.UpdateSecurityStampAsync(user),
                 "update the security stamp");
 
-            await refreshTokenManager.RevokeAllForUserAsync(user.Id, "single_session", cancellationToken);
+            await refreshTokenManager.RevokeAllForUserAsync(
+                user.TenantId,
+                user.Id,
+                "single_session",
+                cancellationToken);
         }
 
-        var accessToken = jwtTokenGenerator.CreateAccessToken(user, role, tenant.Slug);
+        var accessToken = jwtTokenGenerator.CreateAccessToken(user, role, state.Slug);
         var (rawToken, _) = refreshTokenManager.Create(user, ipAddress, stored.FamilyId, replacementId);
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -279,7 +321,11 @@ public sealed class AuthService(
             await userManager.UpdateSecurityStampAsync(user),
             "update the security stamp");
 
-        await refreshTokenManager.RevokeAllForUserAsync(user.Id, "logout_all", cancellationToken);
+        await refreshTokenManager.RevokeAllForUserAsync(
+            user.TenantId,
+            user.Id,
+            "logout_all",
+            cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -344,15 +390,20 @@ public sealed class AuthService(
         EnsureFeature(_identity.EnableTwoFactor);
         var user = await GetCurrentUserAsync(cancellationToken);
 
-        var key = await userManager.GetAuthenticatorKeyAsync(user);
-        if (string.IsNullOrWhiteSpace(key))
+        if (user.TwoFactorEnabled)
         {
-            EnsureSucceeded(
-                await userManager.ResetAuthenticatorKeyAsync(user),
-                "reset the authenticator key");
-
-            key = await userManager.GetAuthenticatorKeyAsync(user);
+            throw new ConflictException(
+                "Two-factor authentication is already enabled.",
+                "two_factor_already_enabled");
         }
+
+        // Never disclose an existing enrollment secret. Starting enrollment always
+        // rotates the key (and security stamp), so the secret is shown only once.
+        EnsureSucceeded(
+            await userManager.ResetAuthenticatorKeyAsync(user),
+            "reset the authenticator key");
+
+        var key = await userManager.GetAuthenticatorKeyAsync(user);
 
         if (string.IsNullOrWhiteSpace(key))
         {
@@ -376,7 +427,7 @@ public sealed class AuthService(
 
         user.TwoFactorEnabled = true;
         EnsureSucceeded(
-            await userManager.UpdateAsync(user),
+            await userManager.SetTwoFactorEnabledAsync(user, true),
             "enable two-factor authentication");
 
         var recoveryCodes = await userManager.GenerateNewTwoFactorRecoveryCodesAsync(user, 10) ?? [];
@@ -389,14 +440,13 @@ public sealed class AuthService(
         var user = await GetCurrentUserAsync(cancellationToken);
         await VerifyAuthenticatorCodeAsync(user, code);
 
-        user.TwoFactorEnabled = false;
+        EnsureSucceeded(
+            await userManager.SetTwoFactorEnabledAsync(user, false),
+            "disable two-factor authentication");
+
         EnsureSucceeded(
             await userManager.ResetAuthenticatorKeyAsync(user),
             "reset the authenticator key");
-
-        EnsureSucceeded(
-            await userManager.UpdateAsync(user),
-            "disable two-factor authentication");
     }
 
     public async Task<AuthTokens> VerifyTwoFactorAsync(
@@ -409,7 +459,8 @@ public sealed class AuthService(
         if (!jwtTokenGenerator.TryValidateTwoFactorChallenge(
                 request.TwoFactorToken,
                 out var userId,
-                out var tenantId))
+                out var tenantId,
+                out var challengeStamp))
         {
             throw InvalidTwoFactorChallenge();
         }
@@ -421,6 +472,12 @@ public sealed class AuthService(
                 cancellationToken);
 
         if (user is null || !user.IsActive || !user.TwoFactorEnabled)
+        {
+            throw InvalidTwoFactorChallenge();
+        }
+
+        if (string.IsNullOrEmpty(user.SecurityStamp)
+            || !string.Equals(challengeStamp, user.SecurityStamp, StringComparison.Ordinal))
         {
             throw InvalidTwoFactorChallenge();
         }
@@ -505,7 +562,11 @@ public sealed class AuthService(
                 await userManager.UpdateSecurityStampAsync(user),
                 "update the security stamp");
 
-            await refreshTokenManager.RevokeAllForUserAsync(user.Id, "single_session", cancellationToken);
+            await refreshTokenManager.RevokeAllForUserAsync(
+                user.TenantId,
+                user.Id,
+                "single_session",
+                cancellationToken);
         }
 
         var accessToken = jwtTokenGenerator.CreateAccessToken(user, role, tenantSlug);
@@ -570,6 +631,11 @@ public sealed class AuthService(
 
     private async Task VerifyAuthenticatorCodeAsync(AppUser user, string code)
     {
+        if (await userManager.IsLockedOutAsync(user))
+        {
+            throw new UnauthorizedException();
+        }
+
         var valid = await userManager.VerifyTwoFactorTokenAsync(
             user,
             TokenOptions.DefaultAuthenticatorProvider,
@@ -577,8 +643,13 @@ public sealed class AuthService(
 
         if (!valid)
         {
+            await userManager.AccessFailedAsync(user);
             throw new UnauthorizedException("Invalid authenticator code.", "invalid_two_factor_code");
         }
+
+        EnsureSucceeded(
+            await userManager.ResetAccessFailedCountAsync(user),
+            "reset the failed access count");
     }
 
     private int SecondsUntil(DateTimeOffset moment) =>
@@ -613,6 +684,6 @@ public sealed class AuthService(
     private static UnauthorizedException InvalidTwoFactorChallenge() =>
         new("Invalid two-factor challenge.", "invalid_two_factor_challenge");
 
-    private static ConflictException InvalidConfirmationToken() =>
+    private static BadRequestException InvalidConfirmationToken() =>
         new("Invalid or expired confirmation token.", "invalid_confirmation_token");
 }

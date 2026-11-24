@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Npgsql;
 using Multitenant.Application.Abstractions.Tenancy;
 using Multitenant.Application.Common;
+using Multitenant.Application.Common.Security;
 using Multitenant.Application.Contracts.Users;
 using Multitenant.Application.Errors.Exceptions;
 using Multitenant.Domain.Entities;
@@ -33,6 +34,19 @@ public sealed partial class UserProvisioningService(
         string role,
         CancellationToken cancellationToken)
     {
+        if (!PasswordRules.IsValid(password))
+        {
+            throw new BadRequestException(PasswordRules.Description, "invalid_password");
+        }
+
+        var normalizedDisplayName = displayName.Trim();
+        if (normalizedDisplayName.Length is < 2 or > 80)
+        {
+            throw new BadRequestException(
+                "Display name must be between 2 and 80 characters after trimming.",
+                "invalid_display_name");
+        }
+
         var normalizedEmail = email.Trim().ToUpperInvariant();
 
         var exists = await dbContext.Users
@@ -54,7 +68,7 @@ public sealed partial class UserProvisioningService(
             TenantId = tenantId,
             UserName = UserNames.For(tenantSlug, email),
             Email = email.Trim(),
-            DisplayName = displayName.Trim(),
+            DisplayName = normalizedDisplayName,
             EmailConfirmed = false,
             IsActive = true,
             CreatedAtUtc = timeProvider.GetUtcNow(),

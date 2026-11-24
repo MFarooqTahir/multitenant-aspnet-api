@@ -12,8 +12,9 @@ public sealed class AuthFeatureFlagTests : IntegrationTestBase
     [Fact]
     public async Task UnconfirmedUsersCannotLoginWhenConfirmationIsRequired()
     {
-        await using var factory = Harness.CreateFactory(configuration =>
-            configuration["Identity:RequireConfirmedEmail"] = "true");
+        await using var factory = Harness.CreateFactory(
+            configuration => configuration["Identity:RequireConfirmedEmail"] = "true",
+            environment: "Development");
         using var client = factory.CreateClient();
 
         await Scenarios.OnboardAsync(client, "flag-email", "Flag Email", "unconfirmed@acme.test");
@@ -39,8 +40,9 @@ public sealed class AuthFeatureFlagTests : IntegrationTestBase
 
         // Sessions minted while confirmation was optional must not survive the
         // flag being switched on.
-        await using var strict = Harness.CreateFactory(configuration =>
-            configuration["Identity:RequireConfirmedEmail"] = "true");
+        await using var strict = Harness.CreateFactory(
+            configuration => configuration["Identity:RequireConfirmedEmail"] = "true",
+            environment: "Development");
         using var strictClient = strict.CreateClient();
 
         var refreshed = await strictClient.PostApi(

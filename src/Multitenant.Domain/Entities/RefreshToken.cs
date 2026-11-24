@@ -1,6 +1,6 @@
 namespace Multitenant.Domain.Entities;
 
-public sealed class RefreshToken
+public sealed class RefreshToken : ITenantOwned
 {
     public Guid Id { get; set; } = Guid.NewGuid();
 

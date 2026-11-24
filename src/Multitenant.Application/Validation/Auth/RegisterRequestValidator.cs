@@ -15,10 +15,13 @@ public sealed class RegisterRequestValidator : AbstractValidator<RegisterRequest
             .WithMessage(TenantSlug.Description);
 
         RuleFor(x => x.Email).NotEmpty().EmailAddress().MaximumLength(256);
-        RuleFor(x => x.DisplayName).NotEmpty().Length(2, 80);
+        RuleFor(x => x.DisplayName)
+            .Must(name => name?.Trim().Length is >= 2 and <= 80)
+            .WithMessage("Display name must be between 2 and 80 characters after trimming.");
 
         RuleFor(x => x.Password)
             .NotEmpty()
+            .MaximumLength(PasswordRules.MaximumLength)
             .Must(PasswordRules.IsValid)
             .WithMessage(PasswordRules.Description);
     }

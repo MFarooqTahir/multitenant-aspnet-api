@@ -3,18 +3,21 @@
 The rules that are not obvious from the code. Setup, commands, the endpoint list, test counts
 and current status live in `README.md`; decisions and their trade-offs live in `docs/adr/`.
 Read those, plus `docs/architecture.md`, before changing tenant or auth behaviour. Start with
-ADRs 0003 (isolation), 0004 (tokens), and 0013–0015 (toolchain and retention).
+ADRs 0003 (isolation), 0004 (tokens), and 0013–0016 (toolchain, retention and concurrency).
 
 ---
 
 ## Golden rules
 
-1. **Tenant context is not optional.** Every tenant-owned write requires
-   `ITenantContext.IsResolved`. Authenticated requests get it from the JWT via
-   `JwtBearerConfiguration`; anonymous flows (login, refresh, onboarding) must call `SetTenant`
-   before touching tenant-owned tables. `ITenantContext` exists only because query filters and
-   the write guard cannot be handed a tenant by each caller — data access itself always goes
-   through `AppDbContext`. There is deliberately no tenant repository.
+1. **Tenant context is not optional for tracked writes or tenant-filtered queries.** Every
+   tracked tenant-owned `SaveChanges` write requires `ITenantContext.IsResolved`. Authenticated
+   requests get it from the JWT via `JwtBearerConfiguration`; anonymous flows must call `SetTenant`
+   before tracked writes or tenant-filtered reads. Deliberate pre-resolution reads use globally
+   unique ids/token hashes, `IgnoreQueryFilters()` with an explicit tenant predicate, or the
+   unfiltered `RefreshTokens` table with tenant-scoped set-based writes. Retention is globally
+   scoped by design. `ITenantContext` exists only because query filters and the write guard cannot
+   be handed a tenant by each caller — data access itself always goes through `AppDbContext`.
+   There is deliberately no tenant repository.
 2. **Never capture `ITenantContext` in an EF query filter.** The filters use
    `AppDbContext.CurrentTenantId` because EF caches the model per context type. A closure
    would freeze the first request's tenant for the process lifetime.
@@ -43,9 +46,10 @@ ADRs 0003 (isolation), 0004 (tokens), and 0013–0015 (toolchain and retention).
    `Configuration/<Section>`, and exceptions in `Errors/Exceptions`. The namespace is the
    folder path (`Multitenant.Application.Contracts.Auth`,
    `Multitenant.Application.Configuration.Jwt`), and Rider's namespace check should stay clean.
-10. **Migrations are generated from the Infrastructure project**, not the API:
+10. **Migrations are generated from the Infrastructure project**, not the API. The EF CLI is
+    pinned in `.config/dotnet-tools.json`; restore it with `dotnet tool restore`, then run:
     ```
-    dotnet ef migrations add X --project src/Multitenant.Infrastructure --startup-project src/Multitenant.Infrastructure --output-dir Persistence/Migrations
+    dotnet tool run dotnet-ef migrations add X --project src/Multitenant.Infrastructure --startup-project src/Multitenant.Infrastructure --output-dir Persistence/Migrations
     ```
 11. **Analyzers are strict.** `TreatWarningsAsErrors=true` and
     `AnalysisLevel=latest-recommended`. Use `[LoggerMessage]` partial methods (CA1848), and keep
@@ -58,12 +62,23 @@ ADRs 0003 (isolation), 0004 (tokens), and 0013–0015 (toolchain and retention).
     Never put a `Version` attribute on a `PackageReference` (NU1010 if the version is missing),
     and never add a preview/RC/beta package. The application and data stack are on .NET 11 GA;
     only the Microsoft.OpenApi 2 / Asp.Versioning.OpenAPI integration remains on 10.x
-    (ADR 0014).
+    (ADR 0014). NuGet lock files are committed; CI and Docker restore with `--locked-mode`.
+    Regenerate every affected `packages.lock.json` after changing the graph.
 14. **`SaveChanges` guards do not cover set-based or raw writes.** `ExecuteUpdateAsync`,
     `ExecuteDeleteAsync` and `ExecuteSql*` bypass `TenantAuditingInterceptor` and query filters.
     Never use them on a tenant-owned entity without an explicit tenant predicate and an
-    integration test. Current set-based writes target only the unfiltered `RefreshTokens`
-    table; the raw SQL tenant lock is parameterized.
+    integration test. Set-based refresh-token revocation always includes `TenantId`; the
+    retention job is deliberately global across expired rows. The raw SQL tenant lock is
+    centralized in `TenantRowLock` and parameterized.
+15. **Tenant ownership is immutable after insert.** The interceptor rejects `TenantId` changes;
+    refresh tokens also have a composite `(TenantId, UserId)` foreign key.
+16. **User administration locks before authorizing.** Create/role/delete operations take the
+    tenant row lock, then re-read the actor and target roles. Registration, tenant rename and
+    feature changes use the same lock-before-recheck rule. Do not move role reads back before
+    the lock.
+17. **2FA secrets and challenges are single-purpose.** Setup always rotates the key, rejects an
+    already-enrolled user, and invalidates sessions. Challenges carry the security stamp and die
+    on stamp rotation; all TOTP management paths share lockout counters.
 
 ---
 
