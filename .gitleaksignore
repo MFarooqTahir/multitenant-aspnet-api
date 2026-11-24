@@ -1,0 +1,7 @@
+# Known false positives: the public RFC 6238 SHA-1 test vector, a
+# non-production HMAC key used only to forge invalid JWTs in integration tests,
+# and two historical README access-token placeholders.
+05f82bb47d1ae8c419f89c54bad9284387beab2c:tests/Multitenant.IntegrationTests/TotpTests.cs:generic-api-key:7
+05f82bb47d1ae8c419f89c54bad9284387beab2c:tests/Multitenant.IntegrationTests/JwtLiveValidationTests.cs:generic-api-key:21
+e27853bb04fb90183cf9e685b1e2a9c5ff5f7500:README.md:generic-api-key:177
+2e11bbe9c6d370353101d2bdf8a66bb6845380a6:README.md:generic-api-key:177
