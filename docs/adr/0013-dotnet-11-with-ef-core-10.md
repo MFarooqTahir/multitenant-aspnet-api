@@ -1,12 +1,13 @@
 # 0013 — Target .NET 11 with the stable EF Core 10 data stack
 
-- **Status:** Superseded by [0014](0014-dotnet-11-data-stack.md) for the data stack; the OpenAPI pin remains in force
+- **Status:** Superseded by [0014](0014-dotnet-11-data-stack.md) and [0017](0017-openapi-3-and-postgresql-18.md)
 - **Date:** 2026-11-18
 
 > **Update (2026-11-25):** Npgsql.EntityFrameworkCore.PostgreSQL 11.0.0 is now stable. ADR 0014
-> moves EF Core, Identity, health checks and Npgsql to 11.0.0. The Microsoft.OpenApi 2 /
-> Asp.Versioning.OpenApi constraint described here still applies. The current SDK policy is
-> `11.0.100` with `latestPatch`; Docker runtime/build images are digest-pinned to `11.0.0`.
+> moves EF Core, Identity, health checks and Npgsql to 11.0.0. ADR 0017 removes the incompatible
+> Asp.Versioning.OpenApi bridge and adopts the built-in OpenAPI 3.2 generator. The current SDK
+> policy is `11.0.100` with `latestPatch`; Docker runtime/build images are digest-pinned to
+> `11.0.0`/`11.0.100`.
 
 ## Context
 

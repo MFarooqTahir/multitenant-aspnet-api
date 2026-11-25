@@ -18,7 +18,7 @@ public sealed class IntegrationHarness : IDisposable, IAsyncLifetime
     public const string CollectionName = "Integration";
 
     private readonly PostgreSqlContainer _container =
-        new PostgreSqlBuilder("postgres:16-alpine").Build();
+        new PostgreSqlBuilder("postgres:18-alpine").Build();
 
     public string ConnectionString { get; private set; } = string.Empty;
 

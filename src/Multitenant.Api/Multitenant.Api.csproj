@@ -2,12 +2,14 @@
 
   <PropertyGroup>
     <Description>Production-minded multi-tenant SaaS API built with ASP.NET Core 11, EF Core and PostgreSQL.</Description>
+    <!-- Asp.Versioning.OpenApi cannot target Microsoft.OpenApi 3.x yet; this app
+         publishes one built-in .NET 11 OpenAPI document named "v1". -->
+    <NoWarn>$(NoWarn);AV0029;AV0030</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Asp.Versioning.Mvc" />
     <PackageReference Include="Asp.Versioning.Mvc.ApiExplorer" />
-    <PackageReference Include="Asp.Versioning.OpenApi" />
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" />

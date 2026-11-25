@@ -3,7 +3,7 @@
 The rules that are not obvious from the code. Setup, commands, the endpoint list, test counts
 and current status live in `README.md`; decisions and their trade-offs live in `docs/adr/`.
 Read those, plus `docs/architecture.md`, before changing tenant or auth behaviour. Start with
-ADRs 0003 (isolation), 0004 (tokens), and 0013–0016 (toolchain, retention and concurrency).
+ADRs 0003 (isolation), 0004 (tokens), and 0013–0017 (toolchain, retention, concurrency and platform upgrades).
 
 ---
 
@@ -60,10 +60,11 @@ ADRs 0003 (isolation), 0004 (tokens), and 0013–0016 (toolchain, retention and 
 13. **NuGet versions live in `Directory.Packages.props`, and only stable releases are allowed.**
     CPM is on: add a `<PackageVersion>` there and a bare `<PackageReference>` in the project.
     Never put a `Version` attribute on a `PackageReference` (NU1010 if the version is missing),
-    and never add a preview/RC/beta package. The application and data stack are on .NET 11 GA;
-    only the Microsoft.OpenApi 2 / Asp.Versioning.OpenAPI integration remains on 10.x
-    (ADR 0014). NuGet lock files are committed; CI and Docker restore with `--locked-mode`.
-    Regenerate every affected `packages.lock.json` after changing the graph.
+    and never add a preview/RC/beta package. The application, data stack, OpenAPI generator
+    and Scalar UI are on stable .NET 11-compatible releases. Asp.Versioning.Mvc/ApiExplorer
+    remain on their latest stable 10.2.1 line. NuGet lock files are committed; CI and Docker
+    restore with `--locked-mode`. Regenerate every affected `packages.lock.json` after changing
+    the graph.
 14. **`SaveChanges` guards do not cover set-based or raw writes.** `ExecuteUpdateAsync`,
     `ExecuteDeleteAsync` and `ExecuteSql*` bypass `TenantAuditingInterceptor` and query filters.
     Never use them on a tenant-owned entity without an explicit tenant predicate and an

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -8,6 +9,7 @@ using Multitenant.Application.Contracts.Auth;
 using Multitenant.Application.Contracts.Projects;
 using Multitenant.Application.Contracts.Tenants;
 using Multitenant.IntegrationTests.Infrastructure;
+using Npgsql;
 
 namespace Multitenant.IntegrationTests;
 
@@ -37,6 +39,7 @@ public sealed class PlatformTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.StartsWith("3.2", document.RootElement.GetProperty("openapi").GetString());
         Assert.True(document.RootElement.GetProperty("paths").TryGetProperty("/api/v1/auth/login", out _));
 
         var scheme = document.RootElement
@@ -46,6 +49,17 @@ public sealed class PlatformTests : IntegrationTestBase
 
         Assert.Equal("bearer", scheme.GetProperty("scheme").GetString());
         Assert.Equal("JWT", scheme.GetProperty("bearerFormat").GetString());
+    }
+
+    [Fact]
+    public async Task IntegrationDatabaseIsPostgreSql18()
+    {
+        await using var connection = new NpgsqlConnection(Harness.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("SHOW server_version_num", connection);
+        var version = Convert.ToInt32(await command.ExecuteScalarAsync(), CultureInfo.InvariantCulture);
+
+        Assert.Equal(18, version / 10_000);
     }
 
     [Fact]

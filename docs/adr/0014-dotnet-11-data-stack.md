@@ -4,6 +4,10 @@
 - **Date:** 2026-11-25
 - **Supersedes:** the EF Core 10 portion of [0013](0013-dotnet-11-with-ef-core-10.md)
 
+> **Update (2026-11-25):** [ADR 0017](0017-openapi-3-and-postgresql-18.md) supersedes the
+> OpenAPI portion below: `Microsoft.AspNetCore.OpenApi` is now 11.0.0 and the incompatible
+> `Asp.Versioning.OpenApi` bridge has been removed.
+
 ## Context
 
 ADR 0013 kept EF Core on 10.0.x because Npgsql had not shipped a stable EF Core 11 provider.
@@ -31,12 +35,14 @@ is an independent integrity improvement, not a requirement of the provider upgra
 - The application, ASP.NET Core packages and the relational data stack are all on .NET 11 GA.
 - No preview/RC dependency remains.
 - EF Core 11 query/translation improvements apply automatically.
-- The OpenAPI stack is the only remaining 10.x package family, isolated behind `OpenApiVersion`.
+- The OpenAPI stack was the only remaining 10.x package family at the time, isolated behind
+  `OpenApiVersion`; ADR 0017 subsequently moved it to the built-in .NET 11 generator.
 
 ## Alternatives considered
 
 - **Stay on EF Core 10** — rejected: the stable provider is available and the mixed transitive
   Microsoft.* graph is no longer necessary.
 - **Use Npgsql 11.0.0-rc.3** — rejected: stable 11.0.0 now exists and the repo is stable-only.
-- **Move OpenAPI to 11 at the same time** — blocked by Asp.Versioning.OpenApi's
-  `Microsoft.OpenApi < 3.0.0` constraint.
+- **Move OpenAPI to 11 at the same time** — was blocked by Asp.Versioning.OpenApi's
+  `Microsoft.OpenApi < 3.0.0` constraint; ADR 0017 later removed that bridge and adopted the
+  built-in generator.

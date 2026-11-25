@@ -8,10 +8,8 @@
     Rule: add a <PackageVersion> here before adding a <PackageReference> to a
     project; the build fails with NU1010 if the version is missing.
 
-    Stable-only policy: no -preview/-rc/-alpha packages. The application and data stack
-    both target .NET 11 GA. The only remaining 10.x pin is the Microsoft.OpenApi 2-based
-    Asp.Versioning.OpenApi integration; see ADR 0014 for the data-stack upgrade and ADR 0013
-    for the remaining OpenAPI gate.
+    Stable-only policy: no -preview/-rc/-alpha packages. The application, data stack,
+    OpenAPI generator and API documentation UI all target stable .NET 11-compatible releases.
 
     The nine Microsoft.Extensions.* assemblies now in the net11.0 shared
     framework (DependencyInjection.Abstractions, Logging.Abstractions, Options,
@@ -23,13 +21,12 @@
     <!-- Keep the coupled data-stack packages on one version. -->
     <DataStackVersion>11.0.0</DataStackVersion>
     <NpgsqlVersion>11.0.0</NpgsqlVersion>
-    <OpenApiVersion>10.0.13</OpenApiVersion>
+    <OpenApiVersion>11.0.0</OpenApiVersion>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageVersion Include="Asp.Versioning.Mvc" Version="10.2.1" />
     <PackageVersion Include="Asp.Versioning.Mvc.ApiExplorer" Version="10.2.1" />
-    <PackageVersion Include="Asp.Versioning.OpenApi" Version="10.2.3" />
     <PackageVersion Include="coverlet.collector" Version="10.1.1" />
     <PackageVersion Include="FluentValidation" Version="12.2.0" />
     <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="12.2.0" />

@@ -21,7 +21,3 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    ignore:
-      # PostgreSQL 17+ needs a dump/restore for existing named volumes; stay on 16 for now.
-      - dependency-name: "postgres"
-        versions: [">=17"]

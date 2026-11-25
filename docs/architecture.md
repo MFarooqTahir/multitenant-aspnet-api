@@ -8,7 +8,7 @@ This document describes the system as it is today. Decisions and their rationale
 ```mermaid
 flowchart LR
     Client["Client app / curl / .http"] -->|"HTTPS + JWT"| Api["Multitenant API"]
-    Api -->|"EF Core / Npgsql"| Db[("PostgreSQL 16")]
+    Api -->|"EF Core / Npgsql"| Db[("PostgreSQL 18")]
     Api -->|"IEmailSender"| Mail["SMTP or log sink"]
     Api -->|"JSON logs"| Logs["CloudWatch Logs / Azure Log Analytics"]
     Api -->|"OpenAPI + Scalar"| Docs["/openapi/v1.json · /scalar"]

@@ -8,7 +8,7 @@
 ![CI](https://github.com/MFarooqTahir/multitenant-aspnet-api/actions/workflows/ci.yml/badge.svg)
 ![Licence](https://img.shields.io/badge/licence-MIT-blue)
 
-A production-minded, multi-tenant SaaS backend on ASP.NET Core 11, EF Core 11 and PostgreSQL 16:
+A production-minded, multi-tenant SaaS backend on ASP.NET Core 11, EF Core 11 and PostgreSQL 18:
 tenant isolation enforced in depth, JWT authentication with rotating refresh tokens, role-based
 authorization, transactional onboarding, rate limiting, health checks, OpenAPI, structured
 logging and a real integration-test suite.
@@ -103,7 +103,7 @@ dotnet test tests/Multitenant.IntegrationTests --filter "FullyQualifiedName~Tena
 | Per-tenant feature flags with whitelisted keys | [ADR 0009](docs/adr/0009-per-tenant-feature-flags.md), `TenantFeatureTests` |
 | Tenant rename with an immutable login slug | [ADR 0010](docs/adr/0010-tenant-lifecycle-scope.md), `TenantManagementTests` |
 | FluentValidation, fail-closed at startup | `Validation/`, `ValidationFilterAssertion` |
-| 304 tests: 64 unit + 240 integration, Testcontainers against real PostgreSQL | [Testing](#testing) |
+| 305 tests: 64 unit + 241 integration, Testcontainers against real PostgreSQL | [Testing](#testing) |
 | Clean layering, one-way dependencies, no business logic in controllers | [ADR 0002](docs/adr/0002-layered-solution.md) |
 | Docker multi-stage image, compose stack, CI publishing to GHCR and coverage reporting | [Operations](#operations), `.github/workflows/ci.yml` |
 | Correlation ids, Serilog JSON logging, optional App Insights | [ADR 0007](docs/adr/0007-observability.md) |
@@ -118,7 +118,7 @@ non-obvious decision is written down as an ADR.
 ### Prerequisites
 
 - [.NET SDK 11.0.100](global.json) (`rollForward: latestPatch`)
-- Docker Desktop (or any PostgreSQL 16 you own)
+- Docker Desktop (or any PostgreSQL 18 you own)
 - Optional EF CLI: repository-local and pinned (`dotnet tool restore`)
 
 ### Run it locally (recommended)
@@ -158,6 +158,11 @@ What happens on first start:
   detect the existing slugs and leave them untouched.
 - Subsequent runs reuse exactly the same database and data. `docker compose down -v` is the
   only command that discards it.
+
+PostgreSQL 18 cannot reuse a PostgreSQL 16 data directory and now stores its cluster under a
+major-version subdirectory of `/var/lib/postgresql`. For disposable local data, run
+`docker compose down -v` before the first PostgreSQL 18 start. For any data you want to keep,
+use `pg_dump`/`pg_restore` or `pg_upgrade` instead.
 
 ### Run everything in Docker
 
@@ -543,8 +548,8 @@ loopback Development connection string only when no value is configured.
 
 ## Testing
 
-**304 tests: 64 unit + 240 integration.** No mocks of the data layer and no in-memory database —
-integration tests run against a real PostgreSQL 16 container (Testcontainers).
+**305 tests: 64 unit + 241 integration.** No mocks of the data layer and no in-memory database —
+integration tests run against a real PostgreSQL 18 container (Testcontainers).
 
 ```bash
 dotnet test multitenant-aspnet-api.slnx          # everything (Docker required)
@@ -590,13 +595,13 @@ write interceptor, claim/2FA-challenge generation and refresh-token hashing.
   separate health-check budget;
 - startup configuration validation (JWT key, email provider/TLS, CORS, forwarded proxies, HTTPS
   public base URL and nested option bounds);
-- health checks, OpenAPI (including the bearer scheme), 404/405/413/415 handling, request-size
+- health checks, OpenAPI 3.2 (including the bearer scheme), 404/405/413/415 handling, request-size
   limits, security headers/CORS exposure, correlation ids, query-string log redaction and the
   problem-details shape.
 
 Docker must be running for the integration suite. The collection fixture starts one container
 per run; each test onboards tenants with unique slugs so tests never collide. The suite takes
-about 75 seconds once the image is cached.
+about 60 seconds once the image is cached.
 
 ---
 
@@ -699,26 +704,30 @@ commit every affected `packages.lock.json`.
 | [0014](docs/adr/0014-dotnet-11-data-stack.md) | Complete the .NET 11 data-stack migration |
 | [0015](docs/adr/0015-refresh-token-retention.md) | Bounded refresh-token retention with a hosted cleanup job |
 | [0016](docs/adr/0016-optimistic-concurrency.md) | Optimistic concurrency for projects and tasks via PostgreSQL `xmin` |
+| [0017](docs/adr/0017-openapi-3-and-postgresql-18.md) | OpenAPI 3.2 and PostgreSQL 18 migration |
 
 ### Toolchain: .NET 11 GA, stable packages only
 
-The application, ASP.NET Core packages and relational data stack all target **.NET 11 GA**.
-Nothing is a preview, RC or beta. The only deliberate 10.x family is the OpenAPI integration,
-because `Asp.Versioning.OpenApi` still requires `Microsoft.OpenApi` 2.x.
+The application, ASP.NET Core packages, relational data stack, OpenAPI generator and API
+documentation UI all use stable **.NET 11-compatible** releases. Nothing is a preview, RC or beta.
+Asp.Versioning.Mvc/ApiExplorer remain on their latest stable 10.2.1 line for URL-segment API
+versioning; the incompatible `Asp.Versioning.OpenApi` bridge has been removed.
 
 | Dependency | Version | Why |
 | --- | --- | --- |
 | SDK / TFM | `11.0.100` / `net11.0` | .NET 11 GA |
 | ASP.NET Core packages (`JwtBearer`, `Mvc.Testing`) | `11.0.0` | .NET 11 GA |
 | EF Core + Identity/health-check integrations | `11.0.0` | Stable Npgsql 11 provider is available |
-| `Npgsql.EntityFrameworkCore.PostgreSQL` | `11.0.0` | Latest stable provider; requires EF Core 11 |
-| `Microsoft.AspNetCore.OpenApi` / `Asp.Versioning.OpenApi` | `10.0.13` / `10.2.3` | `Asp.Versioning.OpenApi` requires `Microsoft.OpenApi` 2.x, while ASP.NET Core OpenAPI 11 requires 3.11+ |
+| `Npgsql.EntityFrameworkCore.PostgreSQL` | `11.0.0` | Supports PostgreSQL 18 |
+| `Microsoft.AspNetCore.OpenApi` | `11.0.0` | Built-in OpenAPI 3.2 generator |
+| `Asp.Versioning.Mvc` / `.ApiExplorer` | `10.2.1` / `10.2.1` | Stable URL-segment versioning and route substitution |
+| `Scalar.AspNetCore` | `3.2.0` | Stable .NET 10+ API reference UI |
+| `MailKit` | `5.0.0` | Stable request-based SMTP API |
 
 Other dependencies stay on their current stable majors (`Serilog.AspNetCore` 11.0.0,
-`MailKit` 4.18.2, `Testcontainers` 4.17.0). MailKit 5 and Scalar 3 are available but are
-separate major upgrades. The data-stack move is recorded in
-[ADR 0014](docs/adr/0014-dotnet-11-data-stack.md); the remaining OpenAPI gate is recorded in
-[ADR 0013](docs/adr/0013-dotnet-11-with-ef-core-10.md).
+`Testcontainers` 4.17.0). The data-stack move is recorded in
+[ADR 0014](docs/adr/0014-dotnet-11-data-stack.md); the OpenAPI 3.2 and PostgreSQL 18 move is
+recorded in [ADR 0017](docs/adr/0017-openapi-3-and-postgresql-18.md).
 
 ### What changes at 10x scale
 
@@ -818,9 +827,6 @@ Deliberate scope cuts, not oversights:
 - **Historical development key.** An old local signing key exists in Git history and has been
   rotated. Purging it requires a coordinated history rewrite; current CI secret scanning and
   push-time checks prevent new leaks.
-- **OpenAPI 11 and PostgreSQL 17+ are not adopted yet.** `Asp.Versioning.OpenApi` still
-  requires `Microsoft.OpenApi` 2.x, and moving the Compose database to PostgreSQL 17 or newer
-  requires a dump/restore of existing named volumes.
 - **Tenant lifecycle is tenant-scoped by design.** Owners can rename their tenant, but there is
   no cross-tenant tenant list and no self-service deactivation: the API has no platform
   administrator, an exposed list would confirm other tenants exist, and an irreversible lockout

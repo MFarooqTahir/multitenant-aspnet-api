@@ -3,6 +3,7 @@ using Asp.Versioning;
 using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using Microsoft.OpenApi;
 using Multitenant.Api.Authorization;
 using Multitenant.Api.Configuration;
 using Multitenant.Api.Endpoints;
@@ -65,8 +66,15 @@ builder.Services
     {
         options.GroupNameFormat = "'v'VVV";
         options.SubstituteApiVersionInUrl = true;
-    })
-    .AddOpenApi(options => options.Document.AddDocumentTransformer<BearerSecuritySchemeTransformer>());
+    });
+
+// Asp.Versioning.OpenApi still targets Microsoft.OpenApi 2.x. Use the built-in
+// .NET 11 generator for the single published API version instead.
+builder.Services.AddOpenApi("v1", options =>
+{
+    options.OpenApiVersion = OpenApiSpecVersion.OpenApi3_2;
+    options.AddDocumentTransformer<BearerSecuritySchemeTransformer>();
+});
 
 builder.Services.AddAuthorization(Policies.Configure);
 builder.Services.AddApiRateLimiting();
@@ -203,7 +211,7 @@ app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.Health
     Predicate = check => check.Tags.Contains("ready"),
 });
 
-app.MapOpenApi().WithDocumentPerVersion();
+app.MapOpenApi("/openapi/{documentName}.json");
 app.MapScalarApiReference(options => options
     .WithTitle("Multitenant API v1")
     .WithTheme(ScalarTheme.Purple));
