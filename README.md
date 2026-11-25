@@ -818,9 +818,9 @@ Deliberate scope cuts, not oversights:
 - **Historical development key.** An old local signing key exists in Git history and has been
   rotated. Purging it requires a coordinated history rewrite; current CI secret scanning and
   push-time checks prevent new leaks.
-- **OpenAPI 11 and PostgreSQL 18 are not adopted yet.** `Asp.Versioning.OpenApi` still
-  requires `Microsoft.OpenApi` 2.x, and moving the Compose database to PostgreSQL 18 requires a
-  dump/restore of existing named volumes.
+- **OpenAPI 11 and PostgreSQL 17+ are not adopted yet.** `Asp.Versioning.OpenApi` still
+  requires `Microsoft.OpenApi` 2.x, and moving the Compose database to PostgreSQL 17 or newer
+  requires a dump/restore of existing named volumes.
 - **Tenant lifecycle is tenant-scoped by design.** Owners can rename their tenant, but there is
   no cross-tenant tenant list and no self-service deactivation: the API has no platform
   administrator, an exposed list would confirm other tenants exist, and an irreversible lockout
