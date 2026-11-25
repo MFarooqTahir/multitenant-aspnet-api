@@ -56,7 +56,7 @@ public sealed partial class SmtpEmailSender(
             await client.AuthenticateAsync(smtp.Username, smtp.Password, cancellationToken);
         }
 
-        await client.SendAsync(mime, cancellationToken);
+        await client.SendAsync(new SmtpSendRequest(mime), cancellationToken);
         await client.DisconnectAsync(quit: true, cancellationToken);
 
         LogSent(logger, message.Subject, smtp.Host);

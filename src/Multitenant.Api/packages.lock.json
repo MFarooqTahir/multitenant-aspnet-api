@@ -60,9 +60,9 @@
       },
       "Scalar.AspNetCore": {
         "type": "Direct",
-        "requested": "[2.18.3, )",
-        "resolved": "2.18.3",
-        "contentHash": "6KXPOkCNnoZTXBl8GVNxq/zpS9UdGnz1a23EWy3CEiwYbZKQ5gi2APZ5mBruXcdXIr+ZXSZYiwX81UagjKFxeg=="
+        "requested": "[3.2.0, )",
+        "resolved": "3.2.0",
+        "contentHash": "sPxc+khxOd44lDvfuuf9+sdQiyaSYQ8cz+udZIHuO45G3psadh6JMlrv+Km6/D7EeQmd6cSMKxIEA8KhrKkvyg=="
       },
       "Serilog.AspNetCore": {
         "type": "Direct",
@@ -110,11 +110,6 @@
         "dependencies": {
           "Asp.Versioning.Abstractions": "10.2.1"
         }
-      },
-      "BouncyCastle.Cryptography": {
-        "type": "Transitive",
-        "resolved": "2.7.0",
-        "contentHash": "U+12df8UEWHgBi04YVf/Lgi2dy3SItlIYvHjjEVa/BngCQIzDCDRBk50DDByCfDvSbe5pRNFr3b7UrVK2kMcLw=="
       },
       "Microsoft.ApplicationInsights": {
         "type": "Transitive",
@@ -201,13 +196,10 @@
         "resolved": "2.12.2",
         "contentHash": "ZkT7qiJe0Kj0+DTZOZo+xrDy1kNmdsWFQVPIQLNx9ZJ0T9cB2LG7r+Bi60so8/+yg1nkS7QCPadrzsTG4VPKrA=="
       },
-      "MimeKit": {
+      "MimeKit.Core": {
         "type": "Transitive",
-        "resolved": "4.18.2",
-        "contentHash": "aYnwCCq+ZgQIsnHSJd3TMeGqf/Rz/9jYEItXpOoG3E2REOCZtLishwBSDFl2wQ/W2SB5wBsvE38DgHZ0IEyz4Q==",
-        "dependencies": {
-          "BouncyCastle.Cryptography": "2.7.0"
-        }
+        "resolved": "5.0.0",
+        "contentHash": "0RLaVyex/BjUGqiw9xtGwzyCMaBcsu33Rth61bDCeVeQaaQK7tjcy4TA+nHKTqwUdp4OGd+gnhuq2fuR+c20qA=="
       },
       "Npgsql": {
         "type": "Transitive",
@@ -282,7 +274,7 @@
       "multitenant.infrastructure": {
         "type": "Project",
         "dependencies": {
-          "MailKit": "[4.18.2, )",
+          "MailKit": "[5.0.0, )",
           "Microsoft.AspNetCore.Authentication.JwtBearer": "[11.0.0, )",
           "Microsoft.AspNetCore.Identity.EntityFrameworkCore": "[11.0.0, )",
           "Microsoft.EntityFrameworkCore": "[11.0.0, )",
@@ -300,11 +292,11 @@
       },
       "MailKit": {
         "type": "CentralTransitive",
-        "requested": "[4.18.2, )",
-        "resolved": "4.18.2",
-        "contentHash": "ofqddpSbdrD00NqTD0ZyVfKvrl/ZZ70VFFEQ+DuR8r8CdbY3U02/sdb0CSQBNUqJifsXfVHIwRe1ToR2MvJJkw==",
+        "requested": "[5.0.0, )",
+        "resolved": "5.0.0",
+        "contentHash": "PG6hnsklTzd/iK9A6j03OxDOas9mh8zOBkbPzcsLmFOODE8Hw3HTy7HAKiJvVHXNpKc3/KMVG/4QvOAKCBbGhA==",
         "dependencies": {
-          "MimeKit": "4.18.2"
+          "MimeKit.Core": "5.0.0"
         }
       },
       "Microsoft.AspNetCore.Authentication.JwtBearer": {
