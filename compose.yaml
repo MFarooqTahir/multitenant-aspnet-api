@@ -1,6 +1,6 @@
-﻿services:
+services:
   postgres:
-    image: postgres:16-alpine@sha256:f2f98726820d0342055351c6e9d36e705f5bfffb3dd53ff556325114b08afb6d
+    image: postgres:17-alpine@sha256:f9cf3e1f0066f0eb0c48707d864f0ac5941e9ff454a072077d97a4d278d07d73
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-multitenant-DbUser}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-multitenant-DbPassword123!}
